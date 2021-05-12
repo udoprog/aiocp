@@ -1,5 +1,5 @@
 use crate::atomic_waker::AtomicWaker;
-use crate::buf::{Pool, RawBuf};
+use crate::buf::RawBuf;
 use parking_lot::lock_api::RawMutex as _;
 use pin_project::pin_project;
 use std::cell::UnsafeCell;
@@ -21,34 +21,51 @@ use winapi::um::minwinbase;
 pub struct RawOverlapped(pub(crate) *mut minwinbase::OVERLAPPED);
 
 #[repr(C)]
-struct Inner {
+pub(crate) struct OverlappedHeader {
     pub(crate) raw: UnsafeCell<minwinbase::OVERLAPPED>,
     pub(crate) lock: parking_lot::RawMutex,
     pub(crate) waker: AtomicWaker,
 }
 
-impl Default for Inner {
-    fn default() -> Self {
-        Self {
+impl OverlappedHeader {
+    pub(crate) fn new() -> Self {
+        OverlappedHeader {
             // Safety: OVERLAPPED structure is valid when zeroed.
             raw: unsafe { mem::MaybeUninit::zeroed().assume_init() },
             lock: parking_lot::RawMutex::INIT,
             waker: AtomicWaker::new(),
         }
     }
+
+    /// Construct from the given overlapped pointer.
+    pub(crate) unsafe fn from_overlapped(overlapped: *const minwinbase::OVERLAPPED) -> Arc<Self> {
+        Arc::from_raw(overlapped as *const Self)
+    }
+
+    /// Try to unlock the overlapped struct.
+    pub(crate) unsafe fn unlock(&self) {
+        self.lock.unlock()
+    }
+
+    /// Wake the currently registered waker.
+    pub(crate) fn wake(&self) {
+        self.waker.wake();
+    }
 }
 
 /// Idiomatic wrapper around an overlapped operation.
-#[repr(transparent)]
-pub struct Overlapped {
-    inner: Arc<Inner>,
+pub struct Overlapped<const N: usize> {
+    pub(crate) header: Arc<OverlappedHeader>,
+    pub(crate) buffers: [RawBuf; N],
 }
 
-impl Overlapped {
-    /// Construct a zeroed overlapped structure.
-    pub fn new() -> Self {
+impl<const N: usize> Overlapped<N> {
+    /// Construct a zeroed overlapped structure with the given buffers available
+    /// for performing operations over.
+    pub fn new(caps: [usize; N]) -> Self {
         Self {
-            inner: Arc::new(Inner::default()),
+            header: Arc::new(OverlappedHeader::new()),
+            buffers: crate::buf::allocate(caps),
         }
     }
 
@@ -57,11 +74,9 @@ impl Overlapped {
     ///
     /// If the operation indicates that it needs to block, the returned future
     /// will complete once the operation has completed.
-    pub unsafe fn perform<'a, H, T, O, R, const N: usize>(
+    pub unsafe fn perform<'a, H, T, R, O>(
         &'a self,
         handle: &'a mut H,
-        pool: &'a Pool,
-        sizes: [usize; N],
         op: T,
         result: R,
     ) -> Perform<'a, H, T, R, N>
@@ -69,13 +84,9 @@ impl Overlapped {
         T: FnOnce(&mut H, RawOverlapped, [RawBuf; N]) -> io::Result<O>,
         R: FnMut(OverlappedResult) -> io::Result<O>,
     {
-        let buffers = pool.acquire(sizes);
-
         Perform {
             overlapped: self,
             handle,
-            pool,
-            buffers,
             op: Some(op),
             result,
         }
@@ -94,7 +105,7 @@ impl Overlapped {
 
         let result = ioapiset::GetOverlappedResult(
             handle.as_raw_handle(),
-            self.inner.raw.get(),
+            self.header.raw.get(),
             bytes_transferred.as_mut_ptr(),
             FALSE,
         );
@@ -111,51 +122,33 @@ impl Overlapped {
 
     /// Try to lock the overlap and return the pointer to the associated
     /// overlapped struct.
-    pub(super) fn lock(&self) -> Option<*mut minwinbase::OVERLAPPED> {
-        if self.inner.lock.try_lock() {
-            return Some(
-                Arc::into_raw(self.inner.clone()) as *const minwinbase::OVERLAPPED as *mut _,
-            );
+    pub(crate) fn lock(&self) -> Option<(*mut minwinbase::OVERLAPPED, [RawBuf; N])> {
+        if self.header.lock.try_lock() {
+            let overlapped =
+                Arc::into_raw(self.header.clone()) as *const minwinbase::OVERLAPPED as *mut _;
+
+            return Some((overlapped, self.buffers));
         }
 
         None
     }
 
-    /// Try to unlock the overlapped struct.
-    pub(super) unsafe fn unlock(&self) {
-        self.inner.lock.unlock()
-    }
-
     /// Register a new waker.
-    pub(super) fn register_by_ref(&self, waker: &Waker) {
-        self.inner.waker.register_by_ref(waker);
-    }
-
-    /// Wake the currently registered waker.
-    pub(super) fn wake(&self) {
-        self.inner.waker.wake();
-    }
-
-    /// Construct from the given overlapped pointer.
-    pub(super) unsafe fn from_overlapped(overlapped: *const minwinbase::OVERLAPPED) -> Self {
-        Self {
-            inner: Arc::from_raw(overlapped as *const Inner),
-        }
+    pub(crate) fn register_by_ref(&self, waker: &Waker) {
+        self.header.waker.register_by_ref(waker);
     }
 }
 
 /// An operation performed over the completion port.
 #[pin_project]
 pub struct Perform<'a, H, T, R, const N: usize> {
-    overlapped: &'a Overlapped,
+    overlapped: &'a Overlapped<N>,
     handle: &'a mut H,
-    pool: &'a Pool,
-    buffers: [RawBuf; N],
     op: Option<T>,
     result: R,
 }
 
-impl<'a, H, T, O, R, const N: usize> Future for Perform<'a, H, T, R, N>
+impl<'a, H, T, R, O, const N: usize> Future for Perform<'a, H, T, R, N>
 where
     H: AsRawHandle,
     T: FnOnce(&mut H, RawOverlapped, [RawBuf; N]) -> io::Result<O>,
@@ -170,8 +163,8 @@ where
         // referencing an internal overlapped handler.
         this.overlapped.register_by_ref(cx.waker());
 
-        let overlapped = match this.overlapped.lock() {
-            Some(overlapped) => overlapped,
+        let (overlapped, mut buffers) = match this.overlapped.lock() {
+            Some(locked) => locked,
             None => return Poll::Pending,
         };
 
@@ -180,18 +173,15 @@ where
             None => {
                 // Safety: we're holding the exclusive lock.
                 let result = unsafe { this.overlapped.result(*this.handle)? };
-
-                // We are the only ones referencing the current collection of
-                // buffers.
-                unsafe {
-                    this.pool.release(*this.buffers);
-                }
-
                 return Poll::Ready((this.result)(result));
             }
         };
 
-        let result = op(this.handle, RawOverlapped(overlapped), *this.buffers);
+        for buffer in &mut buffers {
+            buffer.zero();
+        }
+
+        let result = op(this.handle, RawOverlapped(overlapped), buffers);
 
         let e = match result {
             Ok(output) => return Poll::Ready(Ok(output)),

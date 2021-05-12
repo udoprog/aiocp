@@ -16,6 +16,7 @@ mod write_ext;
 pub use self::write_ext::WriteExt;
 
 mod overlapped;
+use self::overlapped::OverlappedHeader;
 pub use self::overlapped::{Overlapped, OverlappedResult, RawOverlapped};
 
 mod buf;
@@ -82,9 +83,10 @@ impl IoCompletionPort {
                 let completion_key = completion_key.assume_init();
                 let overlapped = overlapped.assume_init();
 
-                let overlapped = Overlapped::from_overlapped(overlapped as *const _);
-                overlapped.unlock();
-                overlapped.wake();
+                let header = OverlappedHeader::from_overlapped(overlapped as *const _);
+                header.unlock();
+                header.wake();
+
                 return Ok(CompletionStatus {
                     completion_key,
                     bytes_transferred,

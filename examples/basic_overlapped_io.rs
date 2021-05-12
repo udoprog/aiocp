@@ -11,8 +11,6 @@ async fn main() -> io::Result<()> {
     let port2 = port.clone();
 
     std::thread::spawn(move || loop {
-        println!("waiting...");
-
         loop {
             port2.wait().unwrap();
         }
@@ -27,16 +25,15 @@ async fn main() -> io::Result<()> {
     port.register_handle(&output)?;
 
     let pool = miocp::Pool::new();
-    let overlapped = miocp::Overlapped::new();
 
     let buf = b"Hello World\n";
+
+    let overlapped = miocp::Overlapped::new([buf.len()]);
 
     unsafe {
         overlapped
             .perform(
                 &mut output,
-                &pool,
-                [buf.len()],
                 |output, overlapped, [mut b]| {
                     b.copy_from(buf);
                     output.write_overlapped(b, overlapped)

@@ -33,6 +33,12 @@ impl RawBuf {
 
         self.len = from.len();
     }
+
+    /// Zero the current up until the configured length.
+    pub fn zero(&mut self) {
+        // Safety: zero only up until `len`.
+        unsafe { ptr::write_bytes(self.ptr, 0, self.len) }
+    }
 }
 
 pub struct Pool {
@@ -47,38 +53,6 @@ impl Pool {
         }
     }
 
-    /// Acquire the given buffers.
-    pub fn acquire<const N: usize>(&self, sizes: [usize; N]) -> [RawBuf; N] {
-        let mut buffers = [RawBuf {
-            ptr: ptr::null_mut(),
-            len: 0,
-            cap: 0,
-        }; N];
-        let mut locked = self.buffers.lock();
-
-        for (i, size) in std::array::IntoIter::new(sizes).enumerate() {
-            let mut buffer = mem::ManuallyDrop::new(
-                locked
-                    .pop()
-                    .unwrap_or_else(move || Vec::with_capacity(size)),
-            );
-
-            unsafe {
-                buffer.set_len(0);
-            }
-
-            let ptr = buffer.as_mut_ptr();
-
-            buffers[i] = RawBuf {
-                ptr,
-                len: buffer.len(),
-                cap: buffer.capacity(),
-            };
-        }
-
-        buffers
-    }
-
     /// Release the specified buffers.
     ///
     /// # Safety
@@ -91,4 +65,26 @@ impl Pool {
             locked.push(buffer.into_vec());
         }
     }
+}
+
+/// Allocate the given buffers.
+pub(crate) fn allocate<const N: usize>(caps: [usize; N]) -> [RawBuf; N] {
+    let mut buffers = [RawBuf {
+        ptr: ptr::null_mut(),
+        len: 0,
+        cap: 0,
+    }; N];
+
+    for (i, cap) in std::array::IntoIter::new(caps).enumerate() {
+        let mut buffer = mem::ManuallyDrop::new(Vec::with_capacity(cap));
+        let ptr = buffer.as_mut_ptr();
+
+        buffers[i] = RawBuf {
+            ptr,
+            len: buffer.len(),
+            cap: buffer.capacity(),
+        };
+    }
+
+    buffers
 }
