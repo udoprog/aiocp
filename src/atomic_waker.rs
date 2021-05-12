@@ -1,3 +1,7 @@
+// Copied from the Tokio project under the MIT license.
+// Url: https://github.com/tokio-rs/tokio/blob/b42f21ec3e212ace25331d0c13889a45769e6006/tokio/src/sync/task/atomic_waker.rs
+// License: https://github.com/tokio-rs/tokio/blob/b42f21ec3e212ace25331d0c13889a45769e6006/LICENSE
+
 use std::cell::UnsafeCell;
 use std::sync::atomic::{self, AtomicUsize};
 

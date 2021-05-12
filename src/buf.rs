@@ -1,22 +1,64 @@
-use parking_lot::Mutex;
 use std::mem;
 use std::ptr;
+use std::slice;
 
 /// A buffer that is raw but owned, ready to be submitted through one of the
 /// overlapped APIs.
-#[derive(Debug, Clone, Copy)]
-pub struct RawBuf {
-    pub(crate) ptr: *mut u8,
-    pub(crate) len: usize,
+#[derive(Debug)]
+pub struct IocpBuf {
+    ptr: *mut u8,
+    len: usize,
     cap: usize,
 }
 
-impl RawBuf {
-    /// Convert back into a vector.
-    pub fn into_vec(self) -> Vec<u8> {
-        // Safety: the owned buffer can only be correctly allocated inside of
-        // this module.
-        unsafe { Vec::from_raw_parts(self.ptr, self.len, self.cap) }
+impl IocpBuf {
+    /// Construct a new empty buffer suitable for submitting to I/O Completion
+    /// Ports.
+    pub(crate) fn new(cap: usize) -> Self {
+        let mut buffer = mem::ManuallyDrop::new(vec![0; cap]);
+        let ptr = buffer.as_mut_ptr();
+
+        Self {
+            ptr,
+            len: buffer.len(),
+            cap: buffer.capacity(),
+        }
+    }
+
+    /// The current length of the buffer.
+    pub(crate) fn len(&self) -> usize {
+        self.len
+    }
+
+    /// Set the written to length.
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure that it is updated to its initialized length.
+    pub(crate) unsafe fn set_len(&mut self, len: usize) {
+        self.len = len;
+    }
+
+    /// Access a pointer to the underlying buffer.
+    pub(crate) fn as_ptr(&self) -> *const u8 {
+        self.ptr as *const _
+    }
+
+    /// Access a mutable pointer to the underlying buffer.
+    pub(crate) fn as_mut_ptr(&mut self) -> *mut u8 {
+        self.ptr
+    }
+
+    /// Access the underlying buffer mutably with the given len.
+    pub(crate) unsafe fn as_ref(&self, len: usize) -> &[u8] {
+        assert! {
+            len < self.cap,
+            "buffer capacity is smaller than required length; cap = {}, len = {}",
+            self.cap,
+            len,
+        };
+
+        slice::from_raw_parts(self.ptr, len)
     }
 
     /// Copy from the specified bytes into the current buffer.
@@ -34,57 +76,45 @@ impl RawBuf {
         self.len = from.len();
     }
 
-    /// Zero the current up until the configured length.
+    /// Zero the current buffer up until its given length and zero its length.
     pub fn zero(&mut self) {
         // Safety: zero only up until `len`.
         unsafe { ptr::write_bytes(self.ptr, 0, self.len) }
-    }
-}
-
-pub struct Pool {
-    buffers: Mutex<Vec<Vec<u8>>>,
-}
-
-impl Pool {
-    /// Construct a new buffer pool.
-    pub fn new() -> Self {
-        Self {
-            buffers: Mutex::new(Vec::new()),
-        }
+        self.len = 0;
     }
 
-    /// Release the specified buffers.
+    /// Get a copy of the current buffer.
     ///
     /// # Safety
     ///
-    /// The caller must ensure that the buffers referenced are no longer used.
-    pub unsafe fn release<const N: usize>(&self, buffers: [RawBuf; N]) {
-        let mut locked = self.buffers.lock();
+    /// Caller must ensure that the buffer being copied is being "owner
+    /// transferred" somewhere, so that the buffer is never aliased.
+    pub(crate) unsafe fn copy(&self) -> Self {
+        ptr::read(self)
+    }
 
-        for buffer in std::array::IntoIter::new(buffers) {
-            locked.push(buffer.into_vec());
+    /// Read and modify the buffer in place, before returning an owned copy of
+    /// it.
+    ///
+    /// # Safety
+    ///
+    /// Caller must ensure that the buffer being copied is being "owner
+    /// transferred" somewhere, so that the buffer is never aliased.
+    pub(crate) unsafe fn read(&mut self, len: usize) -> Self {
+        if self.cap < len {
+            let mut vec = mem::ManuallyDrop::new(Vec::from_raw_parts(self.ptr, self.len, self.cap));
+            vec.reserve(len - self.cap);
+
+            self.ptr = vec.as_mut_ptr();
+            self.cap = vec.capacity();
         }
-    }
-}
 
-/// Allocate the given buffers.
-pub(crate) fn allocate<const N: usize>(caps: [usize; N]) -> [RawBuf; N] {
-    let mut buffers = [RawBuf {
-        ptr: ptr::null_mut(),
-        len: 0,
-        cap: 0,
-    }; N];
-
-    for (i, cap) in std::array::IntoIter::new(caps).enumerate() {
-        let mut buffer = mem::ManuallyDrop::new(Vec::with_capacity(cap));
-        let ptr = buffer.as_mut_ptr();
-
-        buffers[i] = RawBuf {
-            ptr,
-            len: buffer.len(),
-            cap: buffer.capacity(),
-        };
+        self.len = len;
+        ptr::read(self)
     }
 
-    buffers
+    /// Drop the current buffer in place.
+    pub(crate) unsafe fn drop_in_place(&mut self) {
+        let _ = Vec::from_raw_parts(self.ptr, self.len, self.cap);
+    }
 }
