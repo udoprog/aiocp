@@ -1,5 +1,6 @@
 use crate::ext::HandleExt as _;
 use crate::io::{Overlapped, OverlappedResult};
+use crate::ioctl;
 use crate::pool::IocpPool;
 use std::io;
 use std::os::windows::io::AsRawHandle;
@@ -107,7 +108,7 @@ where
     }
 }
 
-/// A write operation wrapping a buffer.
+/// A write named pipe connect.
 #[derive(Debug)]
 pub struct ConnectNamedPipe(());
 
@@ -135,5 +136,43 @@ where
 
     fn result(&mut self, _: OverlappedResult, _: &mut IocpPool) -> io::Result<Self::Output> {
         Ok(())
+    }
+}
+
+/// A write operation wrapping a buffer.
+#[derive(Debug)]
+pub struct DeviceIoCtl<M>(M);
+
+impl<M> DeviceIoCtl<M> {
+    /// Construct a new handler for a connect operation.
+    pub fn new(message: M) -> Self {
+        Self(message)
+    }
+}
+
+impl<H, M> IocpOperation<H> for DeviceIoCtl<M>
+where
+    H: AsRawHandle,
+    M: ioctl::Ioctl,
+{
+    type Output = usize;
+
+    fn start(
+        &mut self,
+        handle: &mut H,
+        overlapped: Overlapped,
+        pool: &mut IocpPool,
+    ) -> io::Result<Self::Output> {
+        use std::slice;
+
+        let len = self.0.len();
+        let mut buf = pool.take(len);
+        // serialize request.
+        buf.copy_from(unsafe { slice::from_raw_parts(&self.0 as *const _ as *const u8, len) });
+        handle.device_io_control_overlapped(M::CONTROL, Some(&mut buf), None, overlapped)
+    }
+
+    fn result(&mut self, result: OverlappedResult, _: &mut IocpPool) -> io::Result<Self::Output> {
+        Ok(result.bytes_transferred)
     }
 }

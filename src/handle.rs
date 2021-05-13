@@ -9,8 +9,21 @@ pub struct Handle {
 
 impl Handle {
     /// Construct from a raw handle.
+    ///
+    /// # Safety
+    ///
+    /// The caller is responsible for ensuring that the Handle is solely owned
+    /// by this structure after calling this function and that it doesn't
+    /// reference a resource that is not thread-safe ([Send] + [Sync]).
     pub unsafe fn from_raw(handle: HANDLE) -> Self {
         Self { handle }
+    }
+
+    /// Construct a handle around an invalid handle value.
+    pub fn invalid() -> Self {
+        Self {
+            handle: handleapi::INVALID_HANDLE_VALUE,
+        }
     }
 }
 

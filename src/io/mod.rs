@@ -1,4 +1,5 @@
 use crate::atomic_waker::AtomicWaker;
+use crate::ioctl;
 use crate::ops;
 use crate::pool::IocpPool;
 use std::cell::UnsafeCell;
@@ -223,6 +224,15 @@ where
     /// side of a named pipe.
     pub async fn connect_named_pipe(&mut self) -> io::Result<()> {
         self.run(ops::ConnectNamedPipe::new()).await
+    }
+
+    /// Connect the current handle, under the assumption that it is the server
+    /// side of a named pipe.
+    pub async fn device_io_control<M>(&mut self, message: M) -> io::Result<usize>
+    where
+        M: ioctl::Ioctl,
+    {
+        self.run(ops::DeviceIoCtl::new(message)).await
     }
 
     /// Coerce into a [Reader][self::tokio::Reader] which implements

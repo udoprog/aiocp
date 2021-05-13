@@ -24,3 +24,5 @@ pub use self::handle::Handle;
 
 mod pipe;
 pub use self::pipe::{CreatePipeClientOptions, CreatePipeOptions};
+
+pub mod ioctl;
