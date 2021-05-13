@@ -1,24 +1,13 @@
 use crate::atomic_waker::AtomicWaker;
-use crate::ioctl;
-use crate::ops;
 use crate::pool::IocpPool;
 use std::cell::UnsafeCell;
-use std::convert::TryFrom as _;
-use std::io;
 use std::mem;
-use std::os::windows::io::AsRawHandle;
 use std::sync::atomic::{AtomicIsize, Ordering};
 use std::sync::Arc;
-use std::task::Waker;
-use winapi::shared::minwindef::FALSE;
-use winapi::um::ioapiset;
 use winapi::um::minwinbase;
 
-#[cfg(feature = "tokio")]
-mod tokio;
-
-mod run;
-pub use self::run::Run;
+mod operation;
+pub use self::operation::Operation;
 
 /// The results of an overlapped operation.
 #[derive(Debug, Clone, Copy)]
@@ -46,11 +35,11 @@ impl Overlapped {
 }
 
 #[repr(C)]
-pub struct IocpOverlappedHeader {
-    raw: UnsafeCell<minwinbase::OVERLAPPED>,
+pub(crate) struct IocpOverlappedHeader {
+    pub(crate) raw: UnsafeCell<minwinbase::OVERLAPPED>,
     pool: UnsafeCell<IocpPool>,
     lock: AtomicIsize,
-    waker: AtomicWaker,
+    pub(crate) waker: AtomicWaker,
 }
 
 impl IocpOverlappedHeader {
@@ -122,135 +111,10 @@ impl Drop for IocpOverlappedHeader {
     }
 }
 
-/// Idiomatic wrapper around an overlapped I/O operation.
-pub struct IocpHandle<H> {
-    pub(crate) handle: H,
-    pub(crate) header: Arc<IocpOverlappedHeader>,
-}
-
-unsafe impl<H> Send for IocpHandle<H> where H: Send {}
-unsafe impl<H> Sync for IocpHandle<H> where H: Sync {}
-
-impl<H> IocpHandle<H> {
-    /// Construct a zeroed overlapped structure with the given buffers available
-    /// for performing operations over.
-    pub(crate) fn new(handle: H) -> Self {
-        Self {
-            handle,
-            header: Arc::new(IocpOverlappedHeader::new()),
-        }
-    }
-
-    /// Run the given I/O operation while managing it's overlapped
-    /// notifications.
-    ///
-    /// If the operation indicates that it needs to block, the returned future
-    /// will complete once the operation has completed.
-    pub fn run<O>(&mut self, op: O) -> Run<'_, H, O>
-    where
-        H: AsRawHandle,
-        O: ops::IocpOperation<H>,
-    {
-        Run::new(self, op)
-    }
-
-    /// Access a reference to the underlying handle.
-    pub fn as_ref(&self) -> &H {
-        &self.handle
-    }
-
-    /// Access a mutable reference to the underlying handle.
-    pub fn as_mut(&mut self) -> &mut H {
-        &mut self.handle
-    }
-
-    /// Get the overlapped result from the current structure.
-    ///
-    /// # Safety
-    ///
-    /// This must only be called while under an exclusive [lock].
-    pub(crate) fn result(&self) -> io::Result<OverlappedResult>
-    where
-        H: AsRawHandle,
-    {
-        unsafe {
-            let mut bytes_transferred = mem::MaybeUninit::zeroed();
-
-            let result = ioapiset::GetOverlappedResult(
-                self.handle.as_raw_handle() as *mut _,
-                self.header.raw.get(),
-                bytes_transferred.as_mut_ptr(),
-                FALSE,
-            );
-
-            if result == FALSE {
-                return Err(io::Error::last_os_error());
-            }
-
-            let bytes_transferred = usize::try_from(bytes_transferred.assume_init())
-                .expect("bytes transferred out of bounds");
-
-            Ok(OverlappedResult { bytes_transferred })
-        }
-    }
-
-    /// Register a new waker.
-    pub(crate) fn register_by_ref(&self, waker: &Waker) {
-        self.header.waker.register_by_ref(waker);
-    }
-}
-
-impl<H> IocpHandle<H>
-where
-    H: AsRawHandle,
-{
-    /// Write the given buffer and return the number of bytes written.
-    pub async fn write<B>(&mut self, buf: B) -> io::Result<usize>
-    where
-        B: AsRef<[u8]>,
-    {
-        self.run(ops::Write::new(buf)).await
-    }
-
-    /// Write the given buffer and return the number of bytes written.
-    pub async fn read<B>(&mut self, buf: B) -> io::Result<usize>
-    where
-        B: AsMut<[u8]>,
-    {
-        self.run(ops::Read::new(buf)).await
-    }
-
-    /// Connect the current handle, under the assumption that it is the server
-    /// side of a named pipe.
-    pub async fn connect_named_pipe(&mut self) -> io::Result<()> {
-        self.run(ops::ConnectNamedPipe::new()).await
-    }
-
-    /// Connect the current handle, under the assumption that it is the server
-    /// side of a named pipe.
-    pub async fn device_io_control<M>(&mut self, message: M) -> io::Result<usize>
-    where
-        M: ioctl::Ioctl,
-    {
-        self.run(ops::DeviceIoCtl::new(message)).await
-    }
-
-    /// Coerce into a [Reader][self::tokio::Reader] which implements
-    /// [AsyncRead][tokio::io::AsyncRead].
-    #[cfg(feature = "tokio")]
-    pub fn reader(&mut self) -> self::tokio::Reader<'_, H> {
-        self::tokio::Reader::new(self)
-    }
-
-    /// Coerce into a [Writer][self::tokio::Writer] which implements
-    /// [AsyncWriter][tokio::io::AsyncWriter].
-    #[cfg(feature = "tokio")]
-    pub fn writer(&mut self) -> self::tokio::Writer<'_, H> {
-        self::tokio::Writer::new(self)
-    }
-}
-
 /// A lock guard that will unlock the resource if dropped.
+///
+/// Dropping the guard automatically clears the available buffers and unlocks
+/// the header.
 pub(crate) struct Guard<'a> {
     header: &'a IocpOverlappedHeader,
 }

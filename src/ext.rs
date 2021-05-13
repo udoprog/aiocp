@@ -13,7 +13,7 @@ use winapi::um::namedpipeapi;
 /// Windows-specific trait for writing to a HANDLE.
 pub trait HandleExt {
     /// Perform an overlapped read over the current I/O object.
-    fn read_overlapped(&mut self, buf: &mut IocpBuf, overlapped: Overlapped) -> io::Result<usize>;
+    fn read_overlapped(&mut self, buf: &mut IocpBuf, overlapped: Overlapped) -> io::Result<()>;
 
     /// Perform an overlapped write over the current I/O object.
     fn write_overlapped(&mut self, buf: &IocpBuf, overlapped: Overlapped) -> io::Result<usize>;
@@ -36,11 +36,7 @@ impl<O> HandleExt for O
 where
     O: AsRawHandle,
 {
-    fn read_overlapped(
-        &mut self,
-        buf: &mut IocpBuf,
-        mut overlapped: Overlapped,
-    ) -> io::Result<usize> {
+    fn read_overlapped(&mut self, buf: &mut IocpBuf, mut overlapped: Overlapped) -> io::Result<()> {
         unsafe {
             let len = DWORD::try_from(buf.len()).unwrap_or(DWORD::MAX);
             let mut n = mem::MaybeUninit::zeroed();
@@ -59,7 +55,7 @@ where
 
             let n = usize::try_from(n.assume_init()).expect("read count oob");
             buf.set_len(n);
-            Ok(n)
+            Ok(())
         }
     }
 

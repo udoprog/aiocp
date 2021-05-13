@@ -7,6 +7,7 @@ use std::os::windows::io::AsRawHandle;
 
 /// The model for a single I/O operation.
 pub trait IocpOperation<H> {
+    /// The output of the operation.
     type Output;
 
     /// Start the I/O operation. This typicall runs the function or system call
@@ -87,12 +88,10 @@ where
         overlapped: Overlapped,
         pool: &mut IocpPool,
     ) -> io::Result<Self::Output> {
-        unsafe {
-            let mut b = pool.take(self.buf.as_mut().len());
-            let n = handle.read_overlapped(&mut b, overlapped)?;
-            self.buf.as_mut()[..n].copy_from_slice(b.as_ref(n));
-            Ok(n)
-        }
+        let mut b = pool.take(self.buf.as_mut().len());
+        handle.read_overlapped(&mut b, overlapped)?;
+        self.buf.as_mut()[..b.len()].copy_from_slice(b.as_ref());
+        Ok(b.len())
     }
 
     fn result(
@@ -100,11 +99,9 @@ where
         result: OverlappedResult,
         pool: &mut IocpPool,
     ) -> io::Result<Self::Output> {
-        unsafe {
-            let n = result.bytes_transferred;
-            self.buf.as_mut()[..n].copy_from_slice(pool.untake().as_ref(n));
-            Ok(n)
-        }
+        let b = pool.release(result.bytes_transferred);
+        self.buf.as_mut()[..b.len()].copy_from_slice(b.as_ref());
+        Ok(b.len())
     }
 }
 

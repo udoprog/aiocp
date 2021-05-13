@@ -1,8 +1,7 @@
 use crate::ext::HandleExt as _;
-use crate::io::IocpHandle;
 use crate::io::Overlapped;
+use crate::iocp_handle::IocpHandle;
 use std::io;
-use std::mem;
 use std::os::windows::io::AsRawHandle;
 use std::pin::Pin;
 use std::task::{Context, Poll};
@@ -34,37 +33,33 @@ impl State {
 
         let pool = guard.pool();
 
-        match mem::replace(self, State::Pending) {
+        match *self {
             State::Init => {
                 pool.reset();
 
                 let overlapped = Overlapped::from_raw(overlapped);
 
-                let mut local_buf = pool.take(buf.remaining());
-                let result = io.handle.read_overlapped(&mut local_buf, overlapped);
+                let mut b = pool.take(buf.remaining());
+                let result = io.handle.read_overlapped(&mut b, overlapped);
 
                 match result {
-                    Ok(n) => {
-                        buf.put_slice(unsafe { local_buf.as_ref(n) });
-                        *self = State::Init;
+                    Ok(()) => {
+                        buf.put_slice(b.as_ref());
                         Poll::Ready(Ok(()))
                     }
                     Err(e) if e.raw_os_error() == Some(winerror::ERROR_IO_PENDING as i32) => {
                         guard.forget();
+                        *self = State::Pending;
                         Poll::Pending
                     }
-                    Err(e) => {
-                        *self = State::Init;
-                        Poll::Ready(Err(e))
-                    }
+                    Err(e) => Poll::Ready(Err(e)),
                 }
             }
             State::Pending => {
                 let result = match io.result() {
                     Ok(result) => {
-                        let n = result.bytes_transferred;
-                        let local_buf = pool.untake();
-                        buf.put_slice(unsafe { local_buf.as_ref(n) });
+                        let b = pool.release(result.bytes_transferred);
+                        buf.put_slice(b.as_ref());
                         Ok(())
                     }
                     Err(e) => Err(e),

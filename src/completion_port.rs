@@ -1,5 +1,7 @@
 use crate::handle::Handle;
-use crate::io::{IocpHandle, IocpOverlappedHeader};
+use crate::io::IocpOverlappedHeader;
+use crate::iocp_handle::IocpHandle;
+use std::fmt;
 use std::io;
 use std::mem;
 use std::os::windows::io::AsRawHandle;
@@ -11,16 +13,10 @@ use winapi::um::ioapiset;
 use winapi::um::winbase;
 use winapi::um::winnt::HANDLE;
 
-/// The status of a single completion.
-#[non_exhaustive]
-pub struct CompletionStatus {
-    /// The header associated with the I/O operation.
-    pub header: Arc<IocpOverlappedHeader>,
-    /// The completion key woken up.
-    pub completion_key: usize,
-    /// The number of bytes transferred.
-    pub bytes_transferred: u32,
-}
+/// The port to post a message for when we are ready to shut down.
+const SHUTDOWN_PORT: usize = usize::MAX;
+/// Any ports equal or larger than this value is reserved.
+const RESERVED_PORTS: usize = !0b1111;
 
 /// The asynchronous handler for a Windows I/O Completion Port.
 ///
@@ -73,7 +69,9 @@ impl CompletionPort {
 
     /// Dequeue the next I/O completion status, driving the completion port in
     /// the process.
-    pub fn get_queued_completion_status(&self) -> io::Result<CompletionStatus> {
+    ///
+    /// Returns `None` if [shutdown] has been called.
+    pub fn get_queued_completion_status(&self) -> io::Result<Option<CompletionStatus>> {
         unsafe {
             let mut bytes_transferred = mem::MaybeUninit::zeroed();
             let mut completion_key = mem::MaybeUninit::zeroed();
@@ -95,13 +93,17 @@ impl CompletionPort {
             let completion_key = completion_key.assume_init();
             let overlapped = overlapped.assume_init();
 
+            if completion_key == SHUTDOWN_PORT {
+                return Ok(None);
+            }
+
             let header = IocpOverlappedHeader::from_overlapped(overlapped);
 
-            Ok(CompletionStatus {
+            Ok(Some(CompletionStatus {
                 header,
                 completion_key,
                 bytes_transferred,
-            })
+            }))
         }
     }
 
@@ -112,8 +114,22 @@ impl CompletionPort {
     where
         H: AsRawHandle,
     {
+        if key >= RESERVED_PORTS {
+            return Err(io::Error::new(
+                io::ErrorKind::Other,
+                "trying to use reserved completion port",
+            ));
+        }
+
         self.register_handle(handle.as_raw_handle() as *mut _, key)?;
         Ok(IocpHandle::new(handle))
+    }
+
+    /// Shut down the current completion port. This will cause
+    /// [get_queued_completion_status][CompletionPort::get_queued_completion_status]
+    /// to immediately return `None` forever.
+    pub fn shutdown(&self) -> io::Result<()> {
+        self.post(SHUTDOWN_PORT, ptr::null_mut())
     }
 
     /// Associate a new handle with the I/O completion port.
@@ -130,5 +146,44 @@ impl CompletionPort {
         }
 
         Ok(())
+    }
+}
+
+impl fmt::Debug for CompletionPort {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("CompletionPort")
+            .field("handle", &self.handle)
+            .finish()
+    }
+}
+
+/// The status of a single completion.
+#[non_exhaustive]
+pub struct CompletionStatus {
+    /// The header associated with the I/O operation.
+    header: Arc<IocpOverlappedHeader>,
+    /// The completion key woken up.
+    pub completion_key: usize,
+    /// The number of bytes transferred.
+    pub bytes_transferred: u32,
+}
+
+impl CompletionStatus {
+    /// Release the task associated with this completion status.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[tokio::main] async fn main() -> std::io::Result<()> {
+    /// let port = Arc::new(CompletionPort::create(2)?);
+    ///
+    /// loop {
+    ///     let status = port.get_queued_completion_status().expect("failed to get next status");
+    ///     status.release();
+    /// }
+    /// # Ok(()) }
+    /// ```
+    pub fn release(&self) {
+        self.header.release()
     }
 }

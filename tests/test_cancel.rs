@@ -1,24 +1,12 @@
-use async_iocp::CompletionPort;
 use std::fs::OpenOptions;
 use std::future::Future as _;
 use std::io;
 use std::os::windows::fs::OpenOptionsExt as _;
-use std::sync::Arc;
 use std::task::Poll;
 
 #[tokio::test]
 async fn test_cancel() -> io::Result<()> {
-    let port = Arc::new(CompletionPort::create(2)?);
-    let port2 = port.clone();
-
-    let t = std::thread::spawn(move || {
-        std::thread::sleep(std::time::Duration::from_secs(1));
-
-        let status = port2.get_queued_completion_status()?;
-
-        status.header.release();
-        Ok::<_, io::Error>(())
-    });
+    let (port, handle) = async_iocp::setup(2)?;
 
     let output = OpenOptions::new()
         .read(true)
@@ -46,6 +34,6 @@ async fn test_cancel() -> io::Result<()> {
     })
     .await?;
 
-    t.join().unwrap()?;
+    handle.join()?;
     Ok(())
 }

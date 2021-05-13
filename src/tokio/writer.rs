@@ -1,5 +1,6 @@
 use crate::ext::HandleExt as _;
-use crate::io::{IocpHandle, Overlapped};
+use crate::io::Overlapped;
+use crate::iocp_handle::IocpHandle;
 use std::io;
 use std::mem;
 use std::os::windows::io::AsRawHandle;
@@ -33,7 +34,7 @@ impl State {
 
         let pool = guard.pool();
 
-        match mem::replace(self, State::Pending) {
+        match *self {
             State::Init => {
                 pool.reset();
 
@@ -44,10 +45,7 @@ impl State {
                 let result = io.handle.write_overlapped(&local_buf, overlapped);
 
                 match result {
-                    Ok(n) => {
-                        *self = State::Init;
-                        Poll::Ready(Ok(n))
-                    }
+                    Ok(n) => Poll::Ready(Ok(n)),
                     Err(e) if e.raw_os_error() == Some(winerror::ERROR_IO_PENDING as i32) => {
                         guard.forget();
                         *self = State::Pending;

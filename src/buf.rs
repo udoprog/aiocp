@@ -30,35 +30,36 @@ impl IocpBuf {
         self.len
     }
 
-    /// Set the written to length.
+    /// Set the written to length. Note that setting the length beyond something
+    /// that has been written results in cluttered bytes being made visible.
     ///
-    /// # Safety
-    ///
-    /// The caller must ensure that it is updated to its initialized length.
-    pub(crate) unsafe fn set_len(&mut self, len: usize) {
+    /// But they will never be uninitialized, so it's not unsafe.
+    pub(crate) fn set_len(&mut self, len: usize) {
+        assert!(
+            len <= self.cap,
+            "updated len is oob; len = {}, cap = {}",
+            len,
+            self.cap
+        );
+
         self.len = len;
     }
 
     /// Access a pointer to the underlying buffer.
-    pub(crate) fn as_ptr(&self) -> *const u8 {
+    pub fn as_ptr(&self) -> *const u8 {
         self.ptr as *const _
     }
 
     /// Access a mutable pointer to the underlying buffer.
-    pub(crate) fn as_mut_ptr(&mut self) -> *mut u8 {
+    pub fn as_mut_ptr(&mut self) -> *mut u8 {
         self.ptr
     }
 
     /// Access the underlying buffer mutably with the given len.
-    pub(crate) unsafe fn as_ref(&self, len: usize) -> &[u8] {
-        assert! {
-            len < self.cap,
-            "buffer capacity is smaller than required length; cap = {}, len = {}",
-            self.cap,
-            len,
-        };
-
-        slice::from_raw_parts(self.ptr, len)
+    pub fn as_ref(&self) -> &[u8] {
+        // Safety: all avenues of modifying the underlying buffer are checked or
+        // unsafe.
+        unsafe { slice::from_raw_parts(self.ptr, self.len) }
     }
 
     /// Copy from the specified bytes into the current buffer.
