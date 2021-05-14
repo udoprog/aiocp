@@ -100,6 +100,15 @@ impl<H> OverlappedHandle<H>
 where
     H: AsRawHandle,
 {
+    /// Asynchronously cancel an pending I/O operation associated with this
+    /// handle on the I/O completion port.
+    pub(crate) fn cancel(&self) {
+        unsafe {
+            let _ =
+                ioapiset::CancelIoEx(self.handle.as_raw_handle() as *mut _, self.header.raw.get());
+        }
+    }
+
     /// Write the given buffer and return the number of bytes written.
     pub async fn write<B>(&mut self, buf: B) -> io::Result<usize>
     where
@@ -129,20 +138,6 @@ where
         M: ioctl::Ioctl,
     {
         self.run(ops::DeviceIoCtl::new(message)).await
-    }
-
-    /// Coerce into a [Reader][crate::tokio::Reader] which implements
-    /// [AsyncRead][tokio::io::AsyncRead].
-    #[cfg(feature = "tokio")]
-    pub fn reader(&mut self) -> crate::tokio::Reader<'_, H> {
-        crate::tokio::Reader::new(self)
-    }
-
-    /// Coerce into a [Writer][crate::tokio::Writer] which implements
-    /// [AsyncWriter][tokio::io::AsyncWriter].
-    #[cfg(feature = "tokio")]
-    pub fn writer(&mut self) -> crate::tokio::Writer<'_, H> {
-        crate::tokio::Writer::new(self)
     }
 }
 

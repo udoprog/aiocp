@@ -12,7 +12,7 @@ use winapi::um::winnt;
 
 /// The pipe mode of a [Handle].
 ///
-/// Set through [NamedPipeOptions::pipe_mode].
+/// Set through [CreatePipeOptions::pipe_mode].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum PipeMode {
@@ -64,13 +64,12 @@ impl CreatePipeOptions {
     /// Creates a new named pipe builder with the default settings.
     ///
     /// ```
-    /// use async_iocp::CreatePipeOptions;
+    /// use aiocp::CreatePipeOptions;
     ///
-    /// const PIPE_NAME: &str = r"\\.\pipe\async-iocp-new";
+    /// const PIPE_NAME: &str = r"\\.\pipe\aiocp-new";
     ///
     /// # #[tokio::main] async fn main() -> std::io::Result<()> {
-    /// let server = CreatePipeOptions::new()
-    ///     .open(PIPE_NAME)?;
+    /// let server = CreatePipeOptions::new().create(PIPE_NAME)?;
     /// # Ok(()) }
     /// ```
     pub fn new() -> CreatePipeOptions {
@@ -112,9 +111,9 @@ impl CreatePipeOptions {
     /// ```
     /// use std::io;
     /// use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
-    /// use async_iocp::{OpenOptions, CreatePipeOptions};
+    /// use aiocp::{OpenOptions, CreatePipeOptions};
     ///
-    /// const PIPE_NAME: &str = r"\\.\pipe\async-iocp-access-inbound";
+    /// const PIPE_NAME: &str = r"\\.\pipe\aiocp-access-inbound";
     ///
     /// # #[tokio::main] async fn main() -> io::Result<()> {
     /// // Server side prevents connecting by denying inbound access, client errors
@@ -122,7 +121,7 @@ impl CreatePipeOptions {
     /// {
     ///     let _server = CreatePipeOptions::new()
     ///         .access_inbound(false)
-    ///         .open(PIPE_NAME)?;
+    ///         .create(PIPE_NAME)?;
     ///
     ///     let e = OpenOptions::new()
     ///         .open(PIPE_NAME)
@@ -144,7 +143,7 @@ impl CreatePipeOptions {
     /// {
     ///     let mut server = CreatePipeOptions::new()
     ///         .access_inbound(false)
-    ///         .open(PIPE_NAME)?;
+    ///         .create(PIPE_NAME)?;
     ///
     ///     let mut client = OpenOptions::new()
     ///         .write(false)
@@ -178,9 +177,9 @@ impl CreatePipeOptions {
     /// ```
     /// use std::io;
     /// use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
-    /// use async_iocp::{OpenOptions, CreatePipeOptions};
+    /// use aiocp::{OpenOptions, CreatePipeOptions};
     ///
-    /// const PIPE_NAME: &str = r"\\.\pipe\async-iocp-access-outbound";
+    /// const PIPE_NAME: &str = r"\\.\pipe\aiocp-access-outbound";
     ///
     /// # #[tokio::main] async fn main() -> io::Result<()> {
     /// // Server side prevents connecting by denying outbound access, client errors
@@ -248,9 +247,9 @@ impl CreatePipeOptions {
     ///
     /// ```
     /// use std::io;
-    /// use async_iocp::CreatePipeOptions;
+    /// use aiocp::CreatePipeOptions;
     ///
-    /// const PIPE_NAME: &str = r"\\.\pipe\async-iocp-first-instance";
+    /// const PIPE_NAME: &str = r"\\.\pipe\aiocp-first-instance";
     ///
     /// # #[tokio::main] async fn main() -> io::Result<()> {
     /// let mut builder = CreatePipeOptions::new();
@@ -262,7 +261,7 @@ impl CreatePipeOptions {
     /// drop(server);
     ///
     /// // OK: since, we've closed the other instance.
-    /// let _server2 = builder.open(PIPE_NAME)?;
+    /// let _server2 = builder.create(PIPE_NAME)?;
     /// # Ok(()) }
     /// ```
     pub fn first_pipe_instance(&mut self, first: bool) -> &mut Self {
@@ -301,7 +300,7 @@ impl CreatePipeOptions {
     /// you do not wish to set an instance limit, leave it unspecified.
     ///
     /// ```should_panic
-    /// use async_iocp::CreatePipeOptions;
+    /// use aiocp::CreatePipeOptions;
     ///
     /// # #[tokio::main] async fn main() -> std::io::Result<()> {
     /// let builder = CreatePipeOptions::new().max_instances(255);
@@ -351,9 +350,9 @@ impl CreatePipeOptions {
     /// # Examples
     ///
     /// ```
-    /// use async_iocp::CreatePipeOptions;
+    /// use aiocp::CreatePipeOptions;
     ///
-    /// const PIPE_NAME: &str = r"\\.\pipe\async-iocp-open";
+    /// const PIPE_NAME: &str = r"\\.\pipe\aiocp-open";
     ///
     /// # #[tokio::main] async fn main() -> std::io::Result<()> {
     /// let server = CreatePipeOptions::new().create(PIPE_NAME)?;
@@ -423,13 +422,13 @@ impl OpenOptions {
     /// Creates a new named pipe builder with the default settings.
     ///
     /// ```
-    /// use async_iocp::{NamedPipeOptions, OpenOptions};
+    /// use aiocp::{CreatePipeOptions, OpenOptions};
     ///
-    /// const PIPE_NAME: &str = r"\\.\pipe\async-iocp-client-new";
+    /// const PIPE_NAME: &str = r"\\.\pipe\aiocp-client-new";
     ///
     /// # #[tokio::main] async fn main() -> std::io::Result<()> {
     /// // Server must be created in order for the client creation to succeed.
-    /// let server = NamedPipeOptions::new().open(PIPE_NAME)?;
+    /// let server = CreatePipeOptions::new().open(PIPE_NAME)?;
     /// let client = OpenOptions::new().open(PIPE_NAME)?;
     /// # Ok(()) }
     /// ```
@@ -491,7 +490,7 @@ impl OpenOptions {
     ///
     /// ```no_run
     /// use std::time::Duration;
-    /// use async_iocp::OpenOptions;
+    /// use aiocp::OpenOptions;
     /// use tokio::time;
     /// use winapi::shared::winerror;
     ///

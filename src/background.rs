@@ -1,4 +1,4 @@
-use crate::completion_port::{CompletionOutcome, CompletionPort, CompletionPortPoll};
+use crate::completion_port::{CompletionOutcome, CompletionPoll, CompletionPort};
 use std::io;
 use std::sync::Arc;
 use std::thread;
@@ -31,7 +31,7 @@ pub fn setup(threads: u32) -> io::Result<(Arc<CompletionPort>, BackgroundThread)
     let thread = std::thread::spawn(move || {
         let pending = loop {
             match handle2.poll()? {
-                CompletionPortPoll::Status(status) => match status.outcome {
+                CompletionPoll::Status(status) => match status.outcome {
                     CompletionOutcome::Cancelled => {
                         status.unlock();
                     }
@@ -39,7 +39,7 @@ pub fn setup(threads: u32) -> io::Result<(Arc<CompletionPort>, BackgroundThread)
                         status.release();
                     }
                 },
-                CompletionPortPoll::Shutdown(shutdown) => {
+                CompletionPoll::Shutdown(shutdown) => {
                     break shutdown.pending;
                 }
             }

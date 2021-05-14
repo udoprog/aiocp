@@ -122,11 +122,9 @@ impl CompletionPort {
             );
 
             let outcome = if result == FALSE {
-                let error = unsafe { errhandlingapi::GetLastError() };
-
-                match error {
+                match errhandlingapi::GetLastError() {
                     winerror::ERROR_OPERATION_ABORTED => CompletionOutcome::Cancelled,
-                    other => return Err(io::Error::from_raw_os_error(error as i32)),
+                    other => return Err(io::Error::from_raw_os_error(other as i32)),
                 }
             } else {
                 CompletionOutcome::Ok
@@ -143,9 +141,9 @@ impl CompletionPort {
     /// Dequeue the next I/O completion status, driving the completion port in
     /// the process.
     ///
-    /// Returns [CompletionPortPoll::Shutdown] if
+    /// Returns [CompletionPoll::Shutdown] if
     /// [shutdown][CompletionPort::shutdown] has been called.
-    pub fn poll(&self) -> io::Result<CompletionPortPoll> {
+    pub fn poll(&self) -> io::Result<CompletionPoll> {
         trace!("poll");
 
         let (bytes_transferred, completion_key, overlapped, outcome) =
@@ -156,7 +154,7 @@ impl CompletionPort {
                 SHUTDOWN_PORT => {
                     let pending =
                         self.inner.pending.fetch_add(isize::MIN, Ordering::SeqCst) as usize;
-                    return Ok(CompletionPortPoll::Shutdown(Shutdown { pending }));
+                    return Ok(CompletionPoll::Shutdown(Shutdown { pending }));
                 }
                 _ => {
                     return Err(io::Error::new(
@@ -173,7 +171,7 @@ impl CompletionPort {
         // Safety: this is handled internally of this crate.
         let header = unsafe { OverlappedHeader::from_overlapped(overlapped) };
 
-        Ok(CompletionPortPoll::Status(CompletionStatus {
+        Ok(CompletionPoll::Status(CompletionStatus {
             header,
             completion_key,
             bytes_transferred,
@@ -298,19 +296,25 @@ impl CompletionStatus {
     /// # Examples
     ///
     /// ```no_run
-    /// use async_iocp::CompletionPort;
+    /// use aiocp::{CompletionPort, CompletionPoll};
     ///
     /// # #[tokio::main] async fn main() -> std::io::Result<()> {
     /// let port = CompletionPort::create(2)?;
     ///
-    /// loop {
+    /// let pending = loop {
     ///     match port.poll()? {
-    ///         CompletionPortPoll::Status(status) => {
+    ///         CompletionPoll::Status(status) => {
     ///             status.unlock();
+    ///             port.shutdown();
     ///         }
-    ///         CompletionPortPoll::Shutdown => break,
+    ///         CompletionPoll::Shutdown(shutdown) => {
+    ///             break shutdown.pending;
+    ///         }
+    ///         _ => unreachable!(),
     ///     }
-    /// }
+    /// };
+    ///
+    /// assert_eq!(pending, 0);
     /// # Ok(()) }
     /// ```
     pub fn unlock(&self) {
@@ -322,19 +326,25 @@ impl CompletionStatus {
     /// # Examples
     ///
     /// ```no_run
-    /// use async_iocp::CompletionPort;
+    /// use aiocp::{CompletionPort, CompletionPoll};
     ///
     /// # #[tokio::main] async fn main() -> std::io::Result<()> {
     /// let port = CompletionPort::create(2)?;
     ///
-    /// loop {
+    /// let pending = loop {
     ///     match port.poll()? {
-    ///         CompletionPortPoll::Status(status) => {
-    ///             status.release();
+    ///         CompletionPoll::Status(status) => {
+    ///             status.unlock();
+    ///             port.shutdown();
     ///         }
-    ///         CompletionPortPoll::Shutdown => break,
+    ///         CompletionPoll::Shutdown(shutdown) => {
+    ///             break shutdown.pending;
+    ///         }
+    ///         _ => unreachable!(),
     ///     }
-    /// }
+    /// };
+    ///
+    /// assert_eq!(pending, 0);
     /// # Ok(()) }
     /// ```
     pub fn release(&self) {
@@ -352,7 +362,7 @@ pub struct Shutdown {
 /// The result of polling the completion port through
 /// [get_queued_completion_status][CompletionPort::get_queued_completion_status].
 #[non_exhaustive]
-pub enum CompletionPortPoll {
+pub enum CompletionPoll {
     /// Port is shutting down and there's the given number of pending operations
     /// to contend with.
     Shutdown(Shutdown),

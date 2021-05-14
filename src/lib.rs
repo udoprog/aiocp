@@ -9,7 +9,9 @@ mod ext;
 pub use self::ext::HandleExt;
 
 mod completion_port;
-pub use self::completion_port::{CompletionOutcome, CompletionPort, CompletionStatus};
+pub use self::completion_port::{
+    CompletionOutcome, CompletionPoll, CompletionPort, CompletionStatus,
+};
 
 mod io;
 pub use self::io::{Overlapped, OverlappedResult};

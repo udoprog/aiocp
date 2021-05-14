@@ -1,10 +1,24 @@
+# aiocp
+
+Experimental asynchronous I/O Completion Port driver for Windows.
+
+This is an attempt to build a safe and sound async driver with minimal overhead
+around completion ports.
+
+## Limitations
+
+* Each wrapped resource can only have one pending I/O operation at a time.
+
+# Example
+
+```rust
 use std::fs::OpenOptions;
 use std::io;
 use std::os::windows::fs::OpenOptionsExt as _;
 
 #[tokio::main]
 async fn main() -> io::Result<()> {
-    let (port, handle) = aiocp::setup(2)?;
+    let (port, background) = aiocp::setup(2)?;
 
     let output = OpenOptions::new()
         .read(true)
@@ -17,6 +31,7 @@ async fn main() -> io::Result<()> {
     dbg!(std::str::from_utf8(&buf[..n]).unwrap());
 
     port.shutdown()?;
-    handle.join()?;
+    background.join()?;
     Ok(())
 }
+```

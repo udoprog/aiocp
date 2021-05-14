@@ -4,10 +4,10 @@ use winapi::shared::winerror;
 
 #[tokio::main]
 async fn main() -> io::Result<()> {
-    let (port, handle) = async_iocp::setup(2)?;
+    let (port, handle) = aiocp::setup(2)?;
 
-    let server = async_iocp::CreatePipeOptions::new().create(r"\\.\pipe\test")?;
-    let client = async_iocp::OpenOptions::new().open(r"\\.\pipe\test")?;
+    let server = aiocp::CreatePipeOptions::new().create(r"\\.\pipe\test")?;
+    let client = aiocp::OpenOptions::new().open(r"\\.\pipe\test")?;
 
     let mut server = port.register(server, 0)?;
     let mut client = port.register(client, 0)?;
@@ -21,13 +21,17 @@ async fn main() -> io::Result<()> {
             }
         }
 
-        server.writer().write_all(b"ping").await?;
+        aiocp::tokio::Io::new(&mut server)
+            .write_all(b"ping")
+            .await?;
         Ok::<_, io::Error>(())
     });
 
     let client = tokio::spawn(async move {
         let mut buf = [0u8; 4];
-        client.reader().read_exact(&mut buf).await?;
+        aiocp::tokio::Io::new(&mut client)
+            .read_exact(&mut buf)
+            .await?;
         Ok::<_, io::Error>(buf)
     });
 

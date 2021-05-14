@@ -5,7 +5,6 @@ use std::io;
 use std::os::windows::io::AsRawHandle;
 use std::task::{Context, Poll};
 use winapi::shared::winerror;
-use winapi::um::ioapiset;
 
 /// The internal state of the driver.
 #[derive(Debug)]
@@ -31,7 +30,6 @@ where
 
 impl<'a, H, O> Operation<'a, H, O>
 where
-    O: IocpOperation<H>,
     H: AsRawHandle,
 {
     /// Construct a new operation wrapper.
@@ -43,10 +41,11 @@ where
         }
     }
 
-    /// Poll the driver.
+    /// Poll the current operation for completion.
     pub fn poll(&mut self, cx: &mut Context<'_>) -> Poll<io::Result<O::Output>>
     where
         H: AsRawHandle,
+        O: IocpOperation<H>,
     {
         let permit = self.io.port.permit()?;
         self.io.register_by_ref(cx.waker());
@@ -95,15 +94,8 @@ where
     H: AsRawHandle,
 {
     fn drop(&mut self) {
-        unsafe {
-            println!("dropping");
-
-            if let State::Remote = self.state {
-                let _ = ioapiset::CancelIoEx(
-                    self.io.handle.as_raw_handle() as *mut _,
-                    self.io.header.raw.get(),
-                );
-            }
+        if let State::Remote = self.state {
+            self.io.cancel();
         }
     }
 }
