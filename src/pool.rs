@@ -1,19 +1,19 @@
-use crate::buf::IocpBuf;
+use crate::buf::Buf;
 
 /// A pool of I/O buffers.
-pub struct IocpPool {
-    buffers: Vec<IocpBuf>,
+pub struct BufferPool {
+    buffers: Vec<Buf>,
     // The number of buffers which are currently busy.
     taken: usize,
     // Buffers taken out of the pool.
     released: usize,
 }
 
-impl IocpPool {
+impl BufferPool {
     /// Construct a new default I/O pool.
     pub(crate) fn new() -> Self {
         Self {
-            buffers: vec![IocpBuf::new(64)],
+            buffers: vec![Buf::new(64)],
             taken: 0,
             released: 0,
         }
@@ -21,9 +21,9 @@ impl IocpPool {
 
     /// Take the next I/O buffer that is not busy. Ensures that the returned
     /// buffer can hold at least `size` bytes.
-    pub fn take(&mut self, size: usize) -> IocpBuf {
+    pub fn take(&mut self, size: usize) -> Buf {
         let buf = if self.taken >= self.buffers.len() {
-            let buf = IocpBuf::new(size);
+            let buf = Buf::new(size);
             self.buffers.push(unsafe { buf.copy() });
             buf
         } else {
@@ -44,7 +44,7 @@ impl IocpPool {
     ///
     /// Caller must ensure that the taken buffer is initialized to the given
     /// length and that no one else is currently using the buffer.
-    pub fn release(&mut self, len: usize) -> IocpBuf {
+    pub fn release(&mut self, len: usize) -> Buf {
         assert! {
             self.released < self.taken,
             "released buffers are oob; released = {}, taken = {}",

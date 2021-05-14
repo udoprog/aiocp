@@ -32,7 +32,7 @@ pub fn setup(threads: u32) -> io::Result<(Arc<CompletionPort>, BackgroundThread)
         let pending = loop {
             match handle2.poll()? {
                 CompletionPoll::Status(status) => match status.outcome {
-                    CompletionOutcome::Cancelled => {
+                    CompletionOutcome::Aborted => {
                         status.unlock();
                     }
                     _ => {

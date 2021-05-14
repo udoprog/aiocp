@@ -1,8 +1,8 @@
 use crate::completion_port::CompletionPort;
-use crate::io::{OverlappedHeader, OverlappedResult};
+use crate::io::OverlappedHeader;
 use crate::ioctl;
 use crate::operation::Operation;
-use crate::ops::{self, IocpOperation};
+use crate::ops::{self, OverlappedOperation};
 use std::convert::TryFrom as _;
 use std::fmt;
 use std::future::Future;
@@ -15,6 +15,13 @@ use std::task::Waker;
 use std::task::{Context, Poll};
 use winapi::shared::minwindef::FALSE;
 use winapi::um::ioapiset;
+
+/// The results of an overlapped operation.
+#[derive(Debug, Clone, Copy)]
+#[non_exhaustive]
+pub struct OverlappedResult {
+    pub bytes_transferred: usize,
+}
 
 /// A wrapped handle able to perform overlapped operations.
 pub struct OverlappedHandle<H> {
@@ -42,12 +49,12 @@ impl<H> OverlappedHandle<H> {
     ///
     /// If the operation indicates that it needs to block, the returned future
     /// will complete once the operation has completed.
-    pub fn run<O>(&mut self, op: O) -> IocpRun<'_, H, O>
+    pub async fn run<O>(&mut self, op: O) -> io::Result<O::Output>
     where
         H: AsRawHandle,
-        O: IocpOperation<H>,
+        O: OverlappedOperation<H>,
     {
-        IocpRun::new(self, op)
+        Run::new(self, op).await
     }
 
     /// Access a reference to the underlying handle.
@@ -165,17 +172,17 @@ where
 }
 
 /// An operation performed over the completion port.
-pub struct IocpRun<'a, H, O>
+pub struct Run<'a, H, O>
 where
     H: AsRawHandle,
 {
     state: State<'a, H, O>,
 }
 
-impl<'a, H, O> IocpRun<'a, H, O>
+impl<'a, H, O> Run<'a, H, O>
 where
     H: AsRawHandle,
-    O: IocpOperation<H>,
+    O: OverlappedOperation<H>,
 {
     /// Construct a new future running the given operation.
     pub(crate) fn new(io: &'a mut OverlappedHandle<H>, op: O) -> Self {
@@ -187,10 +194,10 @@ where
     }
 }
 
-impl<'a, H, O> Future for IocpRun<'a, H, O>
+impl<'a, H, O> Future for Run<'a, H, O>
 where
     H: AsRawHandle,
-    O: IocpOperation<H>,
+    O: OverlappedOperation<H>,
 {
     type Output = io::Result<O::Output>;
 

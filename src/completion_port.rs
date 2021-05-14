@@ -1,6 +1,6 @@
 use crate::handle::Handle;
 use crate::io::OverlappedHeader;
-use crate::iocp_handle::OverlappedHandle;
+use crate::overlapped_handle::OverlappedHandle;
 use std::fmt;
 use std::io;
 use std::mem;
@@ -45,25 +45,6 @@ unsafe impl Send for CompletionPort {}
 unsafe impl Sync for CompletionPort {}
 
 impl CompletionPort {
-    /// Acquire a permit from the completion port with the intention of
-    /// performing I/O operations over it. The returned handle will release it
-    /// from I/O unless it is forgotten using [CompletionPortPermit::forget].
-    pub(crate) fn permit(&self) -> io::Result<CompletionPortPermit<'_>> {
-        let pending = self.inner.pending.fetch_add(1, Ordering::SeqCst);
-        trace!(pending = pending, "acquiring permit");
-
-        if pending >= 0 {
-            Ok(CompletionPortPermit { port: self })
-        } else {
-            self.inner.pending.fetch_sub(1, Ordering::SeqCst);
-
-            Err(io::Error::new(
-                io::ErrorKind::Other,
-                "port is shutting down",
-            ))
-        }
-    }
-
     /// Create a new completion port.
     pub fn create(threads: u32) -> io::Result<Self> {
         unsafe {
@@ -85,6 +66,26 @@ impl CompletionPort {
                 }),
             })
         }
+    }
+
+    /// Acquire a permit from the completion port with the intention of
+    /// performing I/O operations over it. The returned handle will release it
+    /// from I/O unless it is forgotten using [CompletionPortPermit::forget].
+    pub(crate) fn permit(&self) -> io::Result<CompletionPortPermit<'_>> {
+        let pending = self.inner.pending.fetch_add(1, Ordering::SeqCst);
+        trace!(pending = pending, "acquiring permit");
+
+        if pending >= 0 {
+            return Ok(CompletionPortPermit { port: self });
+        }
+
+        let _pending = self.inner.pending.fetch_sub(1, Ordering::SeqCst);
+        trace!(pending = _pending, "releasing failed permit");
+
+        Err(io::Error::new(
+            io::ErrorKind::Other,
+            "port is shutting down",
+        ))
     }
 
     /// Post a message to the I/O completion port.
@@ -123,11 +124,11 @@ impl CompletionPort {
 
             let outcome = if result == FALSE {
                 match errhandlingapi::GetLastError() {
-                    winerror::ERROR_OPERATION_ABORTED => CompletionOutcome::Cancelled,
+                    winerror::ERROR_OPERATION_ABORTED => CompletionOutcome::Aborted,
                     other => return Err(io::Error::from_raw_os_error(other as i32)),
                 }
             } else {
-                CompletionOutcome::Ok
+                CompletionOutcome::Completed
             };
 
             let bytes_transferred = bytes_transferred.assume_init();
@@ -152,8 +153,17 @@ impl CompletionPort {
         if completion_key >= RESERVED_PORTS {
             match completion_key {
                 SHUTDOWN_PORT => {
-                    let pending =
-                        self.inner.pending.fetch_add(isize::MIN, Ordering::SeqCst) as usize;
+                    let pending = self.inner.pending.fetch_add(isize::MIN, Ordering::SeqCst);
+
+                    trace! {
+                        completion_key = completion_key,
+                        overlapped = ?overlapped,
+                        outcome = ?outcome,
+                        pending = pending,
+                        "shutdown",
+                    };
+
+                    let pending = pending as usize;
                     return Ok(CompletionPoll::Shutdown(Shutdown { pending }));
                 }
                 _ => {
@@ -166,7 +176,14 @@ impl CompletionPort {
         }
 
         let _pending = self.inner.pending.fetch_sub(1, Ordering::AcqRel);
-        trace!(pending = _pending, "releasing permit during poll");
+
+        trace! {
+            completion_key = completion_key,
+            overlapped = ?overlapped,
+            outcome = ?outcome,
+            pending = _pending,
+            "completion",
+        };
 
         // Safety: this is handled internally of this crate.
         let header = unsafe { OverlappedHeader::from_overlapped(overlapped) };
@@ -269,12 +286,13 @@ impl fmt::Debug for CompletionPort {
 }
 
 /// The outcome of a completion.
+#[derive(Debug, Clone, Copy)]
 #[non_exhaustive]
 pub enum CompletionOutcome {
-    /// The operation was completed successfully.
-    Ok,
-    /// The operation was cancelled.
-    Cancelled,
+    /// The operation was completed.
+    Completed,
+    /// The operation was aborted.
+    Aborted,
 }
 
 /// The status of a single completion.
@@ -374,17 +392,9 @@ pub struct CompletionPortPermit<'a> {
     port: &'a CompletionPort,
 }
 
-impl CompletionPortPermit<'_> {
-    /// Forget the current I/O permit, under the assumption that it has been
-    /// taken over by a [CompletionPort].
-    pub fn forget(self) {
-        let _ = mem::ManuallyDrop::new(self);
-    }
-}
-
 impl Drop for CompletionPortPermit<'_> {
     fn drop(&mut self) {
         let _pending = self.port.inner.pending.fetch_sub(1, Ordering::SeqCst);
-        trace!(pending = _pending, "releasing permit");
+        trace!(pending = _pending, "releasing permit from guard");
     }
 }

@@ -1,9 +1,9 @@
-use std::fmt;
 use std::os::windows::io::{AsRawHandle, RawHandle};
 use winapi::um::handleapi;
 use winapi::um::winnt::HANDLE;
 
 /// A raw handle.
+#[derive(Debug)]
 pub struct Handle {
     handle: HANDLE,
 }
@@ -36,14 +36,6 @@ impl AsRawHandle for Handle {
 
 unsafe impl Send for Handle {}
 unsafe impl Sync for Handle {}
-
-impl fmt::Debug for Handle {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Handle")
-            .field("handle", &self.handle)
-            .finish()
-    }
-}
 
 impl Drop for Handle {
     fn drop(&mut self) {

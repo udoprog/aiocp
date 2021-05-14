@@ -5,13 +5,13 @@ use std::slice;
 /// A buffer that is raw but owned, ready to be submitted through one of the
 /// overlapped APIs.
 #[derive(Debug)]
-pub struct IocpBuf {
+pub struct Buf {
     ptr: *mut u8,
     len: usize,
     cap: usize,
 }
 
-impl IocpBuf {
+impl Buf {
     /// Construct a new empty buffer suitable for submitting to I/O Completion
     /// Ports.
     pub(crate) fn new(cap: usize) -> Self {

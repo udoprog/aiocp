@@ -1,4 +1,4 @@
-use crate::buf::IocpBuf;
+use crate::buf::Buf;
 use crate::io::Overlapped;
 use std::convert::TryFrom as _;
 use std::io;
@@ -13,22 +13,22 @@ use winapi::um::namedpipeapi;
 /// Windows-specific trait for writing to a HANDLE.
 pub trait HandleExt {
     /// Perform an overlapped read over the current I/O object.
-    fn read_overlapped(&mut self, buf: &mut IocpBuf, overlapped: Overlapped) -> io::Result<()>;
+    fn read_overlapped(&mut self, buf: &mut Buf, overlapped: &mut Overlapped) -> io::Result<()>;
 
     /// Perform an overlapped write over the current I/O object.
-    fn write_overlapped(&mut self, buf: &IocpBuf, overlapped: Overlapped) -> io::Result<usize>;
+    fn write_overlapped(&mut self, buf: &Buf, overlapped: &mut Overlapped) -> io::Result<usize>;
 
     /// Perform an overlapped connect over the current I/O object under the
     /// assumption that it is a named pipe.
-    fn connect_overlapped(&mut self, overlapped: Overlapped) -> io::Result<()>;
+    fn connect_overlapped(&mut self, overlapped: &mut Overlapped) -> io::Result<()>;
 
     /// Execute an I/O device control operation.
     fn device_io_control_overlapped(
         &mut self,
         io_control_code: u32,
-        in_buffer: Option<&IocpBuf>,
-        out_buffer: Option<&mut IocpBuf>,
-        overlapped: Overlapped,
+        in_buffer: Option<&Buf>,
+        out_buffer: Option<&mut Buf>,
+        overlapped: &mut Overlapped,
     ) -> io::Result<usize>;
 }
 
@@ -36,7 +36,7 @@ impl<O> HandleExt for O
 where
     O: AsRawHandle,
 {
-    fn read_overlapped(&mut self, buf: &mut IocpBuf, mut overlapped: Overlapped) -> io::Result<()> {
+    fn read_overlapped(&mut self, buf: &mut Buf, overlapped: &mut Overlapped) -> io::Result<()> {
         unsafe {
             let len = DWORD::try_from(buf.len()).unwrap_or(DWORD::MAX);
             let mut n = mem::MaybeUninit::zeroed();
@@ -59,7 +59,7 @@ where
         }
     }
 
-    fn write_overlapped(&mut self, buf: &IocpBuf, mut overlapped: Overlapped) -> io::Result<usize> {
+    fn write_overlapped(&mut self, buf: &Buf, overlapped: &mut Overlapped) -> io::Result<usize> {
         unsafe {
             let len = DWORD::try_from(buf.len()).unwrap_or(DWORD::MAX);
             let mut n = mem::MaybeUninit::zeroed();
@@ -81,7 +81,7 @@ where
         }
     }
 
-    fn connect_overlapped(&mut self, mut overlapped: Overlapped) -> io::Result<()> {
+    fn connect_overlapped(&mut self, overlapped: &mut Overlapped) -> io::Result<()> {
         unsafe {
             let result =
                 namedpipeapi::ConnectNamedPipe(self.as_raw_handle() as *mut _, overlapped.as_ptr());
@@ -97,9 +97,9 @@ where
     fn device_io_control_overlapped(
         &mut self,
         io_control_code: u32,
-        in_buffer: Option<&IocpBuf>,
-        out_buffer: Option<&mut IocpBuf>,
-        mut overlapped: Overlapped,
+        in_buffer: Option<&Buf>,
+        out_buffer: Option<&mut Buf>,
+        overlapped: &mut Overlapped,
     ) -> io::Result<usize> {
         unsafe {
             let mut n = mem::MaybeUninit::zeroed();

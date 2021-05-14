@@ -4,11 +4,9 @@ use std::io;
 use std::os::windows::ffi::OsStrExt as _;
 use std::ptr;
 use winapi::shared::minwindef::DWORD;
-use winapi::um::fileapi;
 use winapi::um::handleapi;
 use winapi::um::namedpipeapi;
 use winapi::um::winbase;
-use winapi::um::winnt;
 
 /// The pipe mode of a [Handle].
 ///
@@ -399,153 +397,6 @@ impl CreatePipeOptions {
             self.in_buffer_size,
             self.default_timeout,
             attrs as *mut _,
-        );
-
-        if handle == handleapi::INVALID_HANDLE_VALUE {
-            return Err(io::Error::last_os_error());
-        }
-
-        Ok(Handle::from_raw(handle))
-    }
-}
-
-/// A builder suitable for building and interacting with named pipes from the
-/// client side.
-///
-/// See [OpenOptions::open].
-#[derive(Debug, Clone)]
-pub struct OpenOptions {
-    desired_access: DWORD,
-}
-
-impl OpenOptions {
-    /// Creates a new named pipe builder with the default settings.
-    ///
-    /// ```
-    /// use aiocp::{CreatePipeOptions, OpenOptions};
-    ///
-    /// const PIPE_NAME: &str = r"\\.\pipe\aiocp-client-new";
-    ///
-    /// # #[tokio::main] async fn main() -> std::io::Result<()> {
-    /// // Server must be created in order for the client creation to succeed.
-    /// let server = CreatePipeOptions::new().open(PIPE_NAME)?;
-    /// let client = OpenOptions::new().open(PIPE_NAME)?;
-    /// # Ok(()) }
-    /// ```
-    pub fn new() -> Self {
-        Self {
-            desired_access: winnt::GENERIC_READ | winnt::GENERIC_WRITE,
-        }
-    }
-
-    /// If the client supports reading data. This is enabled by default.
-    ///
-    /// This corresponds to setting [GENERIC_READ] in the call to [CreateFile].
-    ///
-    /// [GENERIC_READ]: https://docs.microsoft.com/en-us/windows/win32/secauthz/generic-access-rights
-    /// [CreateFile]: https://docs.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilew
-    pub fn read(&mut self, allowed: bool) -> &mut Self {
-        bool_flag!(self.desired_access, allowed, winnt::GENERIC_READ);
-        self
-    }
-
-    /// If the created pipe supports writing data. This is enabled by default.
-    ///
-    /// This corresponds to setting [GENERIC_WRITE] in the call to [CreateFile].
-    ///
-    /// [GENERIC_WRITE]: https://docs.microsoft.com/en-us/windows/win32/secauthz/generic-access-rights
-    /// [CreateFile]: https://docs.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilew
-    pub fn write(&mut self, allowed: bool) -> &mut Self {
-        bool_flag!(self.desired_access, allowed, winnt::GENERIC_WRITE);
-        self
-    }
-
-    /// Open the named pipe identified by `addr`.
-    ///
-    /// This constructs the handle using [CreateFile].
-    ///
-    /// [CreateFile]: https://docs.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilea
-    ///
-    /// # Errors
-    ///
-    /// This errors if called outside of a [Tokio Runtime] which doesn't have
-    /// [I/O enabled] or if any OS-specific I/O errors occur.
-    ///
-    /// There are a few errors you should be aware of that you need to take into
-    /// account when creating a named pipe on the client side:
-    ///
-    /// * [std::io::ErrorKind::NotFound] - This indicates that the named pipe
-    ///   does not exist. Presumably the server is not up.
-    /// * [ERROR_PIPE_BUSY] - which needs to be tested for through a constant in
-    ///   [winapi]. This error is raised when the named pipe has been created,
-    ///   but the server is not currently waiting for a connection.
-    ///
-    /// [ERROR_PIPE_BUSY]: crate::winapi::shared::winerror::ERROR_PIPE_BUSY
-    /// [I/O enabled]: crate::runtime::Builder::enable_io
-    /// [Tokio Runtime]: crate::runtime::Runtime
-    /// [winapi]: crate::winapi
-    ///
-    /// A connect loop that waits until a socket becomes available looks like
-    /// this:
-    ///
-    /// ```no_run
-    /// use std::time::Duration;
-    /// use aiocp::OpenOptions;
-    /// use tokio::time;
-    /// use winapi::shared::winerror;
-    ///
-    /// const PIPE_NAME: &str = r"\\.\pipe\mynamedpipe";
-    ///
-    /// # #[tokio::main] async fn main() -> std::io::Result<()> {
-    /// let client = loop {
-    ///     match OpenOptions::new().open(PIPE_NAME) {
-    ///         Ok(client) => break client,
-    ///         Err(e) if e.raw_os_error() == Some(winerror::ERROR_PIPE_BUSY as i32) => (),
-    ///         Err(e) => return Err(e),
-    ///     }
-    ///
-    ///     time::sleep(Duration::from_millis(50)).await;
-    /// };
-    ///
-    /// // use the connected client.
-    /// # Ok(()) }
-    /// ```
-    pub fn open(&self, addr: impl AsRef<OsStr>) -> io::Result<Handle> {
-        // Safety: We're calling open_with_security_attributes w/ a null pointer
-        // which disables it.
-        unsafe { self.open_with_security_attributes(addr, ptr::null_mut()) }
-    }
-
-    /// Open the named pipe identified by `addr`.
-    ///
-    /// This is the same as [open][OpenOptions::open] except that
-    /// it supports providing security attributes.
-    ///
-    /// # Safety
-    ///
-    /// The caller must ensure that `attrs` points to an initialized instance
-    /// of a [SECURITY_ATTRIBUTES] structure.
-    ///
-    /// [SECURITY_ATTRIBUTES]: [crate::winapi::um::minwinbase::SECURITY_ATTRIBUTES]
-    pub unsafe fn open_with_security_attributes(
-        &self,
-        addr: impl AsRef<OsStr>,
-        attrs: *mut (),
-    ) -> io::Result<Handle> {
-        let addr = encode_addr(addr);
-
-        // NB: We could use a platform specialized `OpenOptions` here, but since
-        // we have access to winapi it ultimately doesn't hurt to use
-        // `CreateFile` explicitly since it allows the use of our already
-        // well-structured wide `addr` to pass into CreateFileW.
-        let handle = fileapi::CreateFileW(
-            addr.as_ptr(),
-            self.desired_access,
-            0,
-            attrs as *mut _,
-            fileapi::OPEN_EXISTING,
-            winbase::FILE_FLAG_OVERLAPPED | winbase::SECURITY_IDENTIFICATION,
-            ptr::null_mut(),
         );
 
         if handle == handleapi::INVALID_HANDLE_VALUE {

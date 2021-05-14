@@ -14,27 +14,27 @@ pub use self::completion_port::{
 };
 
 mod io;
-pub use self::io::{Overlapped, OverlappedResult};
+pub use self::io::Overlapped;
 
 mod operation;
 pub use self::operation::Operation;
 
-mod iocp_handle;
-pub use self::iocp_handle::{IocpRun, OverlappedHandle};
+mod overlapped_handle;
+pub use self::overlapped_handle::{OverlappedHandle, OverlappedResult};
 
 mod buf;
-pub use self::buf::IocpBuf;
+pub use self::buf::Buf;
 
 pub mod ops;
 
 mod pool;
-pub use self::pool::IocpPool;
+pub use self::pool::BufferPool;
 
 mod handle;
 pub use self::handle::Handle;
 
 mod pipe;
-pub use self::pipe::{CreatePipeOptions, OpenOptions};
+pub use self::pipe::CreatePipeOptions;
 
 pub mod ioctl;
 

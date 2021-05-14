@@ -1,5 +1,7 @@
+use std::fs::OpenOptions;
 use std::future::Future as _;
 use std::io;
+use std::os::windows::fs::OpenOptionsExt as _;
 use std::task::Poll;
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 
@@ -8,7 +10,11 @@ async fn test_cancel() -> io::Result<()> {
     let (port, handle) = aiocp::setup(2)?;
 
     let server = aiocp::CreatePipeOptions::new().create(r"\\.\pipe\test-cancel")?;
-    let client = aiocp::OpenOptions::new().open(r"\\.\pipe\test-cancel")?;
+    let client = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .custom_flags(aiocp::flags::FILE_FLAG_OVERLAPPED)
+        .open(r"\\.\pipe\test-cancel")?;
 
     let mut client = port.register(client, 0)?;
 

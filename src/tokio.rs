@@ -1,12 +1,10 @@
 use crate::ext::HandleExt as _;
-use crate::io::Overlapped;
-use crate::iocp_handle::OverlappedHandle;
+use crate::overlapped_handle::OverlappedHandle;
 use std::io;
 use std::os::windows::io::AsRawHandle;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
-use winapi::shared::winerror;
 
 /// State that can be used to embed a reader.
 #[derive(Debug, Clone, Copy)]
@@ -39,48 +37,35 @@ where
         }
     }
 
-    fn poll_read(
-        &mut self,
-        cx: &mut Context<'_>,
-        buf: &mut tokio::io::ReadBuf<'_>,
-    ) -> Poll<io::Result<()>>
+    fn poll_read(&mut self, cx: &mut Context<'_>, buf: &mut ReadBuf<'_>) -> Poll<io::Result<()>>
     where
         H: AsRawHandle,
     {
+        trace!(op = "read", "poll");
         let permit = self.io.port.permit()?;
         self.io.register_by_ref(cx.waker());
 
-        let (overlapped, mut guard) = match self.io.header.lock() {
-            Some(overlapped) => overlapped,
-            None => return Poll::Pending,
+        let mut guard = match self.io.header.lock() {
+            Some(guard) => guard,
+            None => {
+                return Poll::Pending;
+            }
         };
-
-        let pool = guard.pool();
 
         match self.state {
             State::Local => {
+                let mut overlapped = guard.overlapped();
+                let pool = guard.pool();
                 pool.reset();
-
-                let overlapped = Overlapped::from_raw(overlapped);
-
                 let mut b = pool.take(buf.remaining());
-                let result = self.io.handle.read_overlapped(&mut b, overlapped);
-
-                match result {
-                    Ok(()) => {
-                        buf.put_slice(b.as_ref());
-                        Poll::Ready(Ok(()))
-                    }
-                    Err(e) if e.raw_os_error() == Some(winerror::ERROR_IO_PENDING as i32) => {
-                        guard.forget();
-                        permit.forget();
-                        self.state = State::Remote;
-                        Poll::Pending
-                    }
-                    Err(e) => Poll::Ready(Err(e)),
-                }
+                let _ = self.io.handle.read_overlapped(&mut b, &mut overlapped);
+                std::mem::forget((permit, guard));
+                self.state = State::Remote;
+                Poll::Pending
             }
             State::Remote => {
+                let pool = guard.pool();
+
                 let result = match self.io.result() {
                     Ok(result) => {
                         let b = pool.release(result.bytes_transferred);
@@ -100,36 +85,27 @@ where
     where
         H: AsRawHandle,
     {
+        trace!(op = "write", "poll");
         let permit = self.io.port.permit()?;
         self.io.register_by_ref(cx.waker());
 
-        let (overlapped, mut guard) = match self.io.header.lock() {
-            Some(overlapped) => overlapped,
+        let mut guard = match self.io.header.lock() {
+            Some(guard) => guard,
             None => return Poll::Pending,
         };
 
-        let pool = guard.pool();
-
         match self.state {
             State::Local => {
+                let mut overlapped = guard.overlapped();
+
+                let pool = guard.pool();
                 pool.reset();
-
-                let overlapped = Overlapped::from_raw(overlapped);
-
                 let mut b = pool.take(buf.len());
                 b.copy_from(buf);
-                let result = self.io.handle.write_overlapped(&b, overlapped);
-
-                match result {
-                    Ok(n) => Poll::Ready(Ok(n)),
-                    Err(e) if e.raw_os_error() == Some(winerror::ERROR_IO_PENDING as i32) => {
-                        guard.forget();
-                        permit.forget();
-                        self.state = State::Remote;
-                        Poll::Pending
-                    }
-                    Err(e) => Poll::Ready(Err(e)),
-                }
+                let _ = self.io.handle.write_overlapped(&b, &mut overlapped);
+                std::mem::forget((permit, guard));
+                self.state = State::Remote;
+                Poll::Pending
             }
             State::Remote => {
                 // Safety: we're holding the exclusive lock.

@@ -1,10 +1,8 @@
-use crate::io::Overlapped;
-use crate::iocp_handle::OverlappedHandle;
-use crate::ops::IocpOperation;
+use crate::ops::OverlappedOperation;
+use crate::overlapped_handle::OverlappedHandle;
 use std::io;
 use std::os::windows::io::AsRawHandle;
 use std::task::{Context, Poll};
-use winapi::shared::winerror;
 
 /// The internal state of the driver.
 #[derive(Debug)]
@@ -16,8 +14,8 @@ enum State {
     Remote,
 }
 
-/// Operation helper for turning an [IocpOperation] and a [OverlappedHandle] into a
-/// pollable operation suitable for use in futures.
+/// Operation helper for turning an [OverlappedOperation] and a [OverlappedHandle]
+/// into a pollable operation suitable for use in futures.
 #[derive(Debug)]
 pub struct Operation<'a, H, O>
 where
@@ -45,43 +43,34 @@ where
     pub fn poll(&mut self, cx: &mut Context<'_>) -> Poll<io::Result<O::Output>>
     where
         H: AsRawHandle,
-        O: IocpOperation<H>,
+        O: OverlappedOperation<H>,
     {
         let permit = self.io.port.permit()?;
         self.io.register_by_ref(cx.waker());
 
-        let (overlapped, mut guard) = match self.io.header.lock() {
-            Some(overlapped) => overlapped,
+        let mut guard = match self.io.header.lock() {
+            Some(guard) => guard,
             None => return Poll::Pending,
         };
 
-        let pool = guard.pool();
-
         match self.state {
             State::Local => {
+                let mut overlapped = guard.overlapped();
+                let pool = guard.pool();
                 pool.reset();
-
-                let overlapped = Overlapped::from_raw(overlapped);
-                let result = self.op.start(&mut self.io.handle, overlapped, pool);
-
-                match result {
-                    Ok(output) => Poll::Ready(Ok(output)),
-                    Err(e) if e.raw_os_error() == Some(winerror::ERROR_IO_PENDING as i32) => {
-                        guard.forget();
-                        permit.forget();
-                        self.state = State::Remote;
-                        Poll::Pending
-                    }
-                    Err(e) => Poll::Ready(Err(e)),
-                }
+                let _ = self.op.start(&mut self.io.handle, &mut overlapped, pool);
+                std::mem::forget((permit, guard));
+                self.state = State::Remote;
+                Poll::Pending
             }
             State::Remote => {
+                let pool = guard.pool();
+
                 let result = match self.io.result() {
                     Ok(result) => self.op.result(result, pool),
                     Err(e) => Err(e),
                 };
 
-                pool.reset();
                 self.state = State::Local;
                 Poll::Ready(result)
             }
