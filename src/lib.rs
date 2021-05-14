@@ -9,7 +9,10 @@ mod completion_port;
 pub use self::completion_port::CompletionPort;
 
 mod io;
-pub use self::io::{Operation, Overlapped, OverlappedResult};
+pub use self::io::{Overlapped, OverlappedResult};
+
+mod operation;
+pub use self::operation::Operation;
 
 mod iocp_handle;
 pub use self::iocp_handle::{IocpHandle, IocpRun};

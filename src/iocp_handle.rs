@@ -1,8 +1,7 @@
-use crate::io::Operation;
 use crate::io::{IocpOverlappedHeader, OverlappedResult};
 use crate::ioctl;
-use crate::ops;
-use crate::ops::IocpOperation;
+use crate::operation::Operation;
+use crate::ops::{self, IocpOperation};
 use std::convert::TryFrom as _;
 use std::fmt;
 use std::future::Future;
@@ -43,7 +42,7 @@ impl<H> IocpHandle<H> {
     pub fn run<O>(&mut self, op: O) -> IocpRun<'_, H, O>
     where
         H: AsRawHandle,
-        O: ops::IocpOperation<H>,
+        O: IocpOperation<H>,
     {
         IocpRun::new(self, op)
     }

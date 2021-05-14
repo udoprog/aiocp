@@ -6,9 +6,6 @@ use std::sync::atomic::{AtomicIsize, Ordering};
 use std::sync::Arc;
 use winapi::um::minwinbase;
 
-mod operation;
-pub use self::operation::Operation;
-
 /// The results of an overlapped operation.
 #[derive(Debug, Clone, Copy)]
 #[non_exhaustive]
