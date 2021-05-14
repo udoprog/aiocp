@@ -13,6 +13,7 @@ background = []
 parking_lot = "0.11.1"
 futures = "0.3.15"
 tokio = {version = "1.0", optional = true}
+tracing = {version = "0.1.26", optional = true}
 
 [dependencies.winapi]
 version = "0.3.9"
@@ -22,7 +23,8 @@ features = [
     "ioapiset",
     "minwinbase",
     "winerror",
-    "namedpipeapi"
+    "namedpipeapi",
+    "errhandlingapi",
 ]
 
 [dev-dependencies]

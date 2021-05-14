@@ -7,7 +7,7 @@ async fn main() -> io::Result<()> {
     let (port, handle) = async_iocp::setup(2)?;
 
     let server = async_iocp::CreatePipeOptions::new().create(r"\\.\pipe\test")?;
-    let client = async_iocp::CreatePipeClientOptions::new().create(r"\\.\pipe\test")?;
+    let client = async_iocp::OpenOptions::new().open(r"\\.\pipe\test")?;
 
     let mut server = port.register(server, 0)?;
     let mut client = port.register(client, 0)?;

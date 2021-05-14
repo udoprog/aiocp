@@ -1,4 +1,5 @@
-use crate::io::{IocpOverlappedHeader, OverlappedResult};
+use crate::completion_port::CompletionPort;
+use crate::io::{OverlappedHeader, OverlappedResult};
 use crate::ioctl;
 use crate::operation::Operation;
 use crate::ops::{self, IocpOperation};
@@ -15,22 +16,24 @@ use std::task::{Context, Poll};
 use winapi::shared::minwindef::FALSE;
 use winapi::um::ioapiset;
 
-/// Idiomatic wrapper around an overlapped I/O operation.
-pub struct IocpHandle<H> {
+/// A wrapped handle able to perform overlapped operations.
+pub struct OverlappedHandle<H> {
     pub(crate) handle: H,
-    pub(crate) header: Arc<IocpOverlappedHeader>,
+    pub(crate) port: CompletionPort,
+    pub(crate) header: Arc<OverlappedHeader>,
 }
 
-unsafe impl<H> Send for IocpHandle<H> where H: Send {}
-unsafe impl<H> Sync for IocpHandle<H> where H: Sync {}
+unsafe impl<H> Send for OverlappedHandle<H> where H: Send {}
+unsafe impl<H> Sync for OverlappedHandle<H> where H: Sync {}
 
-impl<H> IocpHandle<H> {
+impl<H> OverlappedHandle<H> {
     /// Construct a zeroed overlapped structure with the given buffers available
     /// for performing operations over.
-    pub(crate) fn new(handle: H) -> Self {
+    pub(crate) fn new(handle: H, port: CompletionPort) -> Self {
         Self {
             handle,
-            header: Arc::new(IocpOverlappedHeader::new()),
+            port,
+            header: Arc::new(OverlappedHeader::new()),
         }
     }
 
@@ -93,7 +96,7 @@ impl<H> IocpHandle<H> {
     }
 }
 
-impl<H> IocpHandle<H>
+impl<H> OverlappedHandle<H>
 where
     H: AsRawHandle,
 {
@@ -143,12 +146,12 @@ where
     }
 }
 
-impl<H> fmt::Debug for IocpHandle<H>
+impl<H> fmt::Debug for OverlappedHandle<H>
 where
     H: AsRawHandle,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("IocpHandle")
+        f.debug_struct("OverlappedHandle")
             .field("handle", &self.handle.as_raw_handle())
             .finish()
     }
@@ -180,7 +183,7 @@ where
     O: IocpOperation<H>,
 {
     /// Construct a new future running the given operation.
-    pub(crate) fn new(io: &'a mut IocpHandle<H>, op: O) -> Self {
+    pub(crate) fn new(io: &'a mut OverlappedHandle<H>, op: O) -> Self {
         Self {
             state: State::Running {
                 op: Operation::new(io, op),

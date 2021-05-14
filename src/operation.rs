@@ -1,5 +1,5 @@
 use crate::io::Overlapped;
-use crate::iocp_handle::IocpHandle;
+use crate::iocp_handle::OverlappedHandle;
 use crate::ops::IocpOperation;
 use std::io;
 use std::os::windows::io::AsRawHandle;
@@ -17,14 +17,14 @@ enum State {
     Remote,
 }
 
-/// Operation helper for turning an [IocpOperation] and a [IocpHandle] into a
+/// Operation helper for turning an [IocpOperation] and a [OverlappedHandle] into a
 /// pollable operation suitable for use in futures.
 #[derive(Debug)]
 pub struct Operation<'a, H, O>
 where
     H: AsRawHandle,
 {
-    io: &'a mut IocpHandle<H>,
+    io: &'a mut OverlappedHandle<H>,
     op: O,
     state: State,
 }
@@ -35,7 +35,7 @@ where
     H: AsRawHandle,
 {
     /// Construct a new operation wrapper.
-    pub fn new(io: &'a mut IocpHandle<H>, op: O) -> Self {
+    pub fn new(io: &'a mut OverlappedHandle<H>, op: O) -> Self {
         Self {
             io,
             op,
@@ -48,6 +48,7 @@ where
     where
         H: AsRawHandle,
     {
+        let permit = self.io.port.permit()?;
         self.io.register_by_ref(cx.waker());
 
         let (overlapped, mut guard) = match self.io.header.lock() {
@@ -68,6 +69,7 @@ where
                     Ok(output) => Poll::Ready(Ok(output)),
                     Err(e) if e.raw_os_error() == Some(winerror::ERROR_IO_PENDING as i32) => {
                         guard.forget();
+                        permit.forget();
                         self.state = State::Remote;
                         Poll::Pending
                     }
@@ -94,6 +96,8 @@ where
 {
     fn drop(&mut self) {
         unsafe {
+            println!("dropping");
+
             if let State::Remote = self.state {
                 let _ = ioapiset::CancelIoEx(
                     self.io.handle.as_raw_handle() as *mut _,

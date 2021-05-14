@@ -32,16 +32,16 @@ impl Overlapped {
 }
 
 #[repr(C)]
-pub(crate) struct IocpOverlappedHeader {
+pub(crate) struct OverlappedHeader {
     pub(crate) raw: UnsafeCell<minwinbase::OVERLAPPED>,
     pool: UnsafeCell<IocpPool>,
     lock: AtomicIsize,
     pub(crate) waker: AtomicWaker,
 }
 
-impl IocpOverlappedHeader {
+impl OverlappedHeader {
     pub(crate) fn new() -> Self {
-        IocpOverlappedHeader {
+        OverlappedHeader {
             // Safety: OVERLAPPED structure is valid when zeroed.
             raw: unsafe { mem::MaybeUninit::zeroed().assume_init() },
             pool: UnsafeCell::new(IocpPool::new()),
@@ -88,7 +88,7 @@ impl IocpOverlappedHeader {
 
     /// Unlock access to resources associated with this operation.
     #[inline]
-    fn unlock(&self) {
+    pub fn unlock(&self) {
         // Safety: This is only accessible at positions in the program where
         // resources are no longer in use by the operating system, so this
         // cannot be incorrectly used.
@@ -102,7 +102,7 @@ impl IocpOverlappedHeader {
     }
 }
 
-impl Drop for IocpOverlappedHeader {
+impl Drop for OverlappedHeader {
     fn drop(&mut self) {
         unsafe { (*self.pool.get()).drop_in_place() }
     }
@@ -113,7 +113,7 @@ impl Drop for IocpOverlappedHeader {
 /// Dropping the guard automatically clears the available buffers and unlocks
 /// the header.
 pub(crate) struct Guard<'a> {
-    header: &'a IocpOverlappedHeader,
+    header: &'a OverlappedHeader,
 }
 
 impl Guard<'_> {

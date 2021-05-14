@@ -1,8 +1,7 @@
 use crate::ext::HandleExt as _;
 use crate::io::Overlapped;
-use crate::iocp_handle::IocpHandle;
+use crate::iocp_handle::OverlappedHandle;
 use std::io;
-use std::mem;
 use std::os::windows::io::AsRawHandle;
 use std::pin::Pin;
 use std::task::{Context, Poll};
@@ -20,11 +19,12 @@ impl State {
         &mut self,
         cx: &mut Context<'_>,
         buf: &[u8],
-        io: &mut IocpHandle<H>,
+        io: &mut OverlappedHandle<H>,
     ) -> Poll<io::Result<usize>>
     where
         H: AsRawHandle,
     {
+        let permit = io.port.permit()?;
         io.register_by_ref(cx.waker());
 
         let (overlapped, mut guard) = match io.header.lock() {
@@ -48,6 +48,7 @@ impl State {
                     Ok(n) => Poll::Ready(Ok(n)),
                     Err(e) if e.raw_os_error() == Some(winerror::ERROR_IO_PENDING as i32) => {
                         guard.forget();
+                        permit.forget();
                         *self = State::Pending;
                         Poll::Pending
                     }
@@ -71,12 +72,12 @@ impl State {
 }
 
 pub struct Writer<'a, H> {
-    io: &'a mut IocpHandle<H>,
+    io: &'a mut OverlappedHandle<H>,
     state: State,
 }
 
 impl<'a, H> Writer<'a, H> {
-    pub(crate) fn new(io: &'a mut IocpHandle<H>) -> Self {
+    pub(crate) fn new(io: &'a mut OverlappedHandle<H>) -> Self {
         Self {
             io,
             state: State::Init,

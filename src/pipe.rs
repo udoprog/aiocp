@@ -49,7 +49,7 @@ macro_rules! bool_flag {
 /// options. This is required to use for named pipe servers who wants to modify
 /// pipe-related options.
 ///
-/// See [CreatePipeOptions::create].
+/// See [CreatePipeOptions::open].
 #[derive(Debug, Clone)]
 pub struct CreatePipeOptions {
     open_mode: DWORD,
@@ -64,13 +64,13 @@ impl CreatePipeOptions {
     /// Creates a new named pipe builder with the default settings.
     ///
     /// ```
-    /// use tokio::net::windows::CreatePipeOptions;
+    /// use async_iocp::CreatePipeOptions;
     ///
-    /// const PIPE_NAME: &str = r"\\.\pipe\tokio-named-pipe-new";
+    /// const PIPE_NAME: &str = r"\\.\pipe\async-iocp-new";
     ///
     /// # #[tokio::main] async fn main() -> std::io::Result<()> {
     /// let server = CreatePipeOptions::new()
-    ///     .create(PIPE_NAME)?;
+    ///     .open(PIPE_NAME)?;
     /// # Ok(()) }
     /// ```
     pub fn new() -> CreatePipeOptions {
@@ -112,29 +112,29 @@ impl CreatePipeOptions {
     /// ```
     /// use std::io;
     /// use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
-    /// use tokio::net::windows::{CreatePipeClientOptions, CreatePipeOptions};
+    /// use async_iocp::{OpenOptions, CreatePipeOptions};
     ///
-    /// const PIPE_NAME: &str = r"\\.\pipe\tokio-named-pipe-access-inbound";
+    /// const PIPE_NAME: &str = r"\\.\pipe\async-iocp-access-inbound";
     ///
     /// # #[tokio::main] async fn main() -> io::Result<()> {
     /// // Server side prevents connecting by denying inbound access, client errors
-    /// // when attempting to create the connection.
+    /// // when attempting to open the connection.
     /// {
     ///     let _server = CreatePipeOptions::new()
     ///         .access_inbound(false)
-    ///         .create(PIPE_NAME)?;
+    ///         .open(PIPE_NAME)?;
     ///
-    ///     let e = CreatePipeClientOptions::new()
-    ///         .create(PIPE_NAME)
+    ///     let e = OpenOptions::new()
+    ///         .open(PIPE_NAME)
     ///         .unwrap_err();
     ///
     ///     assert_eq!(e.kind(), io::ErrorKind::PermissionDenied);
     ///
     ///     // Disabling writing allows a client to connect, but leads to runtime
     ///     // error if a write is attempted.
-    ///     let mut client = CreatePipeClientOptions::new()
+    ///     let mut client = OpenOptions::new()
     ///         .write(false)
-    ///         .create(PIPE_NAME)?;
+    ///         .open(PIPE_NAME)?;
     ///
     ///     let e = client.write(b"ping").await.unwrap_err();
     ///     assert_eq!(e.kind(), io::ErrorKind::PermissionDenied);
@@ -144,11 +144,11 @@ impl CreatePipeOptions {
     /// {
     ///     let mut server = CreatePipeOptions::new()
     ///         .access_inbound(false)
-    ///         .create(PIPE_NAME)?;
+    ///         .open(PIPE_NAME)?;
     ///
-    ///     let mut client = CreatePipeClientOptions::new()
+    ///     let mut client = OpenOptions::new()
     ///         .write(false)
-    ///         .create(PIPE_NAME)?;
+    ///         .open(PIPE_NAME)?;
     ///
     ///     let write = server.write_all(b"ping");
     ///
@@ -178,27 +178,27 @@ impl CreatePipeOptions {
     /// ```
     /// use std::io;
     /// use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
-    /// use tokio::net::windows::{CreatePipeClientOptions, CreatePipeOptions};
+    /// use async_iocp::{OpenOptions, CreatePipeOptions};
     ///
-    /// const PIPE_NAME: &str = r"\\.\pipe\tokio-named-pipe-access-outbound";
+    /// const PIPE_NAME: &str = r"\\.\pipe\async-iocp-access-outbound";
     ///
     /// # #[tokio::main] async fn main() -> io::Result<()> {
     /// // Server side prevents connecting by denying outbound access, client errors
-    /// // when attempting to create the connection.
+    /// // when attempting to open the connection.
     /// {
     ///     let _server = CreatePipeOptions::new()
     ///         .access_outbound(false)
     ///         .create(PIPE_NAME)?;
     ///
-    ///     let e = CreatePipeClientOptions::new()
-    ///         .create(PIPE_NAME)
+    ///     let e = OpenOptions::new()
+    ///         .open(PIPE_NAME)
     ///         .unwrap_err();
     ///
     ///     assert_eq!(e.kind(), io::ErrorKind::PermissionDenied);
     ///
     ///     // Disabling reading allows a client to connect, but leads to runtime
     ///     // error if a read is attempted.
-    ///     let mut client = CreatePipeClientOptions::new().read(false).create(PIPE_NAME)?;
+    ///     let mut client = OpenOptions::new().read(false).open(PIPE_NAME)?;
     ///
     ///     let mut buf = [0u8; 4];
     ///     let e = client.read(&mut buf).await.unwrap_err();
@@ -208,7 +208,7 @@ impl CreatePipeOptions {
     /// // A functional, unidirectional client-to-server only communication.
     /// {
     ///     let mut server = CreatePipeOptions::new().access_outbound(false).create(PIPE_NAME)?;
-    ///     let mut client = CreatePipeClientOptions::new().read(false).create(PIPE_NAME)?;
+    ///     let mut client = OpenOptions::new().read(false).open(PIPE_NAME)?;
     ///
     ///     // TODO: Explain why this test doesn't work without calling connect
     ///     // first.
@@ -235,7 +235,7 @@ impl CreatePipeOptions {
         self
     }
 
-    /// If you attempt to create multiple instances of a pipe with this flag,
+    /// If you attempt to open multiple instances of a pipe with this flag,
     /// creation of the first instance succeeds, but creation of the next
     /// instance fails with [ERROR_ACCESS_DENIED].
     ///
@@ -248,9 +248,9 @@ impl CreatePipeOptions {
     ///
     /// ```
     /// use std::io;
-    /// use tokio::net::windows::CreatePipeOptions;
+    /// use async_iocp::CreatePipeOptions;
     ///
-    /// const PIPE_NAME: &str = r"\\.\pipe\tokio-named-pipe-first-instance";
+    /// const PIPE_NAME: &str = r"\\.\pipe\async-iocp-first-instance";
     ///
     /// # #[tokio::main] async fn main() -> io::Result<()> {
     /// let mut builder = CreatePipeOptions::new();
@@ -262,7 +262,7 @@ impl CreatePipeOptions {
     /// drop(server);
     ///
     /// // OK: since, we've closed the other instance.
-    /// let _server2 = builder.create(PIPE_NAME)?;
+    /// let _server2 = builder.open(PIPE_NAME)?;
     /// # Ok(()) }
     /// ```
     pub fn first_pipe_instance(&mut self, first: bool) -> &mut Self {
@@ -301,7 +301,7 @@ impl CreatePipeOptions {
     /// you do not wish to set an instance limit, leave it unspecified.
     ///
     /// ```should_panic
-    /// use tokio::net::windows::CreatePipeOptions;
+    /// use async_iocp::CreatePipeOptions;
     ///
     /// # #[tokio::main] async fn main() -> std::io::Result<()> {
     /// let builder = CreatePipeOptions::new().max_instances(255);
@@ -351,9 +351,9 @@ impl CreatePipeOptions {
     /// # Examples
     ///
     /// ```
-    /// use tokio::net::windows::CreatePipeOptions;
+    /// use async_iocp::CreatePipeOptions;
     ///
-    /// const PIPE_NAME: &str = r"\\.\pipe\tokio-named-pipe-create";
+    /// const PIPE_NAME: &str = r"\\.\pipe\async-iocp-open";
     ///
     /// # #[tokio::main] async fn main() -> std::io::Result<()> {
     /// let server = CreatePipeOptions::new().create(PIPE_NAME)?;
@@ -367,7 +367,7 @@ impl CreatePipeOptions {
 
     /// Create the named pipe identified by `addr` for use as a server.
     ///
-    /// This is the same as [create][CreatePipeOptions::create] except that it
+    /// This is the same as [open][CreatePipeOptions::open] except that it
     /// supports providing security attributes.
     ///
     /// # Errors
@@ -413,24 +413,24 @@ impl CreatePipeOptions {
 /// A builder suitable for building and interacting with named pipes from the
 /// client side.
 ///
-/// See [CreatePipeClientOptions::create].
+/// See [OpenOptions::open].
 #[derive(Debug, Clone)]
-pub struct CreatePipeClientOptions {
+pub struct OpenOptions {
     desired_access: DWORD,
 }
 
-impl CreatePipeClientOptions {
+impl OpenOptions {
     /// Creates a new named pipe builder with the default settings.
     ///
     /// ```
-    /// use tokio::net::windows::{NamedPipeOptions, CreatePipeClientOptions};
+    /// use async_iocp::{NamedPipeOptions, OpenOptions};
     ///
-    /// const PIPE_NAME: &str = r"\\.\pipe\tokio-named-pipe-client-new";
+    /// const PIPE_NAME: &str = r"\\.\pipe\async-iocp-client-new";
     ///
     /// # #[tokio::main] async fn main() -> std::io::Result<()> {
     /// // Server must be created in order for the client creation to succeed.
-    /// let server = NamedPipeOptions::new().create(PIPE_NAME)?;
-    /// let client = CreatePipeClientOptions::new().create(PIPE_NAME)?;
+    /// let server = NamedPipeOptions::new().open(PIPE_NAME)?;
+    /// let client = OpenOptions::new().open(PIPE_NAME)?;
     /// # Ok(()) }
     /// ```
     pub fn new() -> Self {
@@ -491,7 +491,7 @@ impl CreatePipeClientOptions {
     ///
     /// ```no_run
     /// use std::time::Duration;
-    /// use tokio::net::windows::CreatePipeClientOptions;
+    /// use async_iocp::OpenOptions;
     /// use tokio::time;
     /// use winapi::shared::winerror;
     ///
@@ -499,7 +499,7 @@ impl CreatePipeClientOptions {
     ///
     /// # #[tokio::main] async fn main() -> std::io::Result<()> {
     /// let client = loop {
-    ///     match CreatePipeClientOptions::new().create(PIPE_NAME) {
+    ///     match OpenOptions::new().open(PIPE_NAME) {
     ///         Ok(client) => break client,
     ///         Err(e) if e.raw_os_error() == Some(winerror::ERROR_PIPE_BUSY as i32) => (),
     ///         Err(e) => return Err(e),
@@ -511,15 +511,15 @@ impl CreatePipeClientOptions {
     /// // use the connected client.
     /// # Ok(()) }
     /// ```
-    pub fn create(&self, addr: impl AsRef<OsStr>) -> io::Result<Handle> {
-        // Safety: We're calling create_with_security_attributes w/ a null
-        // pointer which disables it.
-        unsafe { self.create_with_security_attributes(addr, ptr::null_mut()) }
+    pub fn open(&self, addr: impl AsRef<OsStr>) -> io::Result<Handle> {
+        // Safety: We're calling open_with_security_attributes w/ a null pointer
+        // which disables it.
+        unsafe { self.open_with_security_attributes(addr, ptr::null_mut()) }
     }
 
     /// Open the named pipe identified by `addr`.
     ///
-    /// This is the same as [create][CreatePipeClientOptions::create] except that
+    /// This is the same as [open][OpenOptions::open] except that
     /// it supports providing security attributes.
     ///
     /// # Safety
@@ -528,7 +528,7 @@ impl CreatePipeClientOptions {
     /// of a [SECURITY_ATTRIBUTES] structure.
     ///
     /// [SECURITY_ATTRIBUTES]: [crate::winapi::um::minwinbase::SECURITY_ATTRIBUTES]
-    pub unsafe fn create_with_security_attributes(
+    pub unsafe fn open_with_security_attributes(
         &self,
         addr: impl AsRef<OsStr>,
         attrs: *mut (),
