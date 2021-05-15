@@ -46,7 +46,7 @@ impl Overlapped {
 #[repr(C)]
 pub(crate) struct OverlappedHeader {
     pub(crate) raw: UnsafeCell<minwinbase::OVERLAPPED>,
-    pool: UnsafeCell<BufferPool>,
+    pool: BufferPool,
     lock: AtomicBool,
     pub(crate) waker: AtomicWaker,
 }
@@ -56,7 +56,7 @@ impl OverlappedHeader {
         OverlappedHeader {
             // Safety: OVERLAPPED structure is valid when zeroed.
             raw: unsafe { mem::MaybeUninit::zeroed().assume_init() },
-            pool: UnsafeCell::new(BufferPool::new()),
+            pool: BufferPool::new(),
             lock: AtomicBool::new(false),
             waker: AtomicWaker::new(),
         }
@@ -118,8 +118,8 @@ pub(crate) struct OverlappedGuard<'a> {
 
 impl OverlappedGuard<'_> {
     /// Access the pool associated with the locked state of the header.
-    pub(crate) fn pool(&mut self) -> &mut BufferPool {
-        unsafe { &mut *self.header.pool.get() }
+    pub(crate) fn pool(&self) -> &BufferPool {
+        &self.header.pool
     }
 
     /// Get the current header as an overlapped pointer.

@@ -17,15 +17,11 @@ pub trait OverlappedOperation<H> {
         &mut self,
         handle: &mut H,
         overlapped: &mut Overlapped,
-        pool: &mut BufferPool,
+        pool: &BufferPool,
     ) -> io::Result<Self::Output>;
 
     /// Translate the overlapped result into the output of the I/O operation.
-    fn result(
-        &mut self,
-        result: OverlappedResult,
-        pool: &mut BufferPool,
-    ) -> io::Result<Self::Output>;
+    fn result(&mut self, result: OverlappedResult, pool: &BufferPool) -> io::Result<Self::Output>;
 }
 
 /// A write operation wrapping a buffer.
@@ -52,7 +48,7 @@ where
         &mut self,
         handle: &mut H,
         overlapped: &mut Overlapped,
-        pool: &mut BufferPool,
+        pool: &BufferPool,
     ) -> io::Result<Self::Output> {
         let buf = self.buf.as_ref();
         let mut b = pool.take(buf.len());
@@ -60,7 +56,7 @@ where
         handle.write_overlapped(&mut b, overlapped)
     }
 
-    fn result(&mut self, result: OverlappedResult, _: &mut BufferPool) -> io::Result<Self::Output> {
+    fn result(&mut self, result: OverlappedResult, _: &BufferPool) -> io::Result<Self::Output> {
         // This is executed *after* the overlapped operation has completed.
         Ok(result.bytes_transferred)
     }
@@ -90,7 +86,7 @@ where
         &mut self,
         handle: &mut H,
         overlapped: &mut Overlapped,
-        pool: &mut BufferPool,
+        pool: &BufferPool,
     ) -> io::Result<Self::Output> {
         let mut b = pool.take(self.buf.as_mut().len());
         handle.read_overlapped(&mut b, overlapped)?;
@@ -100,11 +96,7 @@ where
         Ok(filled.len())
     }
 
-    fn result(
-        &mut self,
-        result: OverlappedResult,
-        pool: &mut BufferPool,
-    ) -> io::Result<Self::Output> {
+    fn result(&mut self, result: OverlappedResult, pool: &BufferPool) -> io::Result<Self::Output> {
         let b = unsafe { pool.release(result.bytes_transferred) };
 
         let filled = b.filled();
@@ -134,12 +126,12 @@ where
         &mut self,
         handle: &mut H,
         overlapped: &mut Overlapped,
-        _: &mut BufferPool,
+        _: &BufferPool,
     ) -> io::Result<Self::Output> {
         handle.connect_overlapped(overlapped)
     }
 
-    fn result(&mut self, _: OverlappedResult, _: &mut BufferPool) -> io::Result<Self::Output> {
+    fn result(&mut self, _: OverlappedResult, _: &BufferPool) -> io::Result<Self::Output> {
         Ok(())
     }
 }
@@ -166,7 +158,7 @@ where
         &mut self,
         handle: &mut H,
         overlapped: &mut Overlapped,
-        pool: &mut BufferPool,
+        pool: &BufferPool,
     ) -> io::Result<Self::Output> {
         use std::slice;
 
@@ -177,7 +169,7 @@ where
         handle.device_io_control_overlapped(M::CONTROL, Some(&mut buf), None, overlapped)
     }
 
-    fn result(&mut self, result: OverlappedResult, _: &mut BufferPool) -> io::Result<Self::Output> {
+    fn result(&mut self, result: OverlappedResult, _: &BufferPool) -> io::Result<Self::Output> {
         Ok(result.bytes_transferred)
     }
 }

@@ -61,7 +61,7 @@ where
         let permit = self.io.port.permit()?;
         self.io.register_by_ref(cx.waker());
 
-        let mut guard = match self.io.header.lock() {
+        let guard = match self.io.header.lock() {
             Some(guard) => guard,
             None => {
                 return Poll::Pending;
@@ -114,7 +114,7 @@ where
         let permit = self.io.port.permit()?;
         self.io.register_by_ref(cx.waker());
 
-        let mut guard = match self.io.header.lock() {
+        let guard = match self.io.header.lock() {
             Some(guard) => guard,
             None => return Poll::Pending,
         };
