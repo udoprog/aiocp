@@ -14,6 +14,7 @@ pub(crate) fn handle_io_pending<O>(
     result: io::Result<O>,
     permit: crate::sys::CompletionPortPermit<'_>,
     guard: OverlappedGuard<'_>,
+    overlapped: Overlapped,
 ) -> Option<io::Error> {
     match result {
         Ok(..) => (),
@@ -21,25 +22,38 @@ pub(crate) fn handle_io_pending<O>(
         Err(e) => return Some(e),
     }
 
-    std::mem::forget((permit, guard));
+    std::mem::forget((permit, guard, overlapped));
     None
 }
 
 /// An overlapped structure.
 #[derive(Debug)]
 pub struct Overlapped {
-    ptr: *mut minwinbase::OVERLAPPED,
+    raw: *mut minwinbase::OVERLAPPED,
 }
 
 impl Overlapped {
     /// Convert from a raw pointer.
-    pub(crate) fn from_raw(ptr: *mut minwinbase::OVERLAPPED) -> Self {
-        Self { ptr }
+    pub(crate) fn from_raw(raw: *mut minwinbase::OVERLAPPED) -> Self {
+        Self { raw }
     }
 
     /// Access a pointer to the underlying overlapped struct.
     pub(crate) fn as_ptr(&mut self) -> *mut minwinbase::OVERLAPPED {
-        self.ptr
+        self.raw
+    }
+}
+
+impl Drop for Overlapped {
+    fn drop(&mut self) {
+        unsafe {
+            // NB: by default we make sure to consume the header that this
+            // pointer points towards.
+            //
+            // It is up to the user of this overlapped structure to forget it
+            // otherwise.
+            let _ = OverlappedHeader::from_overlapped(self.raw);
+        }
     }
 }
 

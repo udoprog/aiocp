@@ -76,13 +76,10 @@ where
                 let mut b = pool.take(buf.remaining());
                 let result = self.io.handle.read_overlapped(&mut b, &mut overlapped);
 
-                match result {
-                    Ok(..) => (),
-                    Err(e) if e.raw_os_error() == Some(crate::errors::ERROR_IO_PENDING) => (),
-                    Err(e) => return Poll::Ready(Err(e)),
+                if let Some(e) = crate::io::handle_io_pending(result, permit, guard, overlapped) {
+                    return Poll::Ready(Err(e));
                 }
 
-                std::mem::forget((permit, guard));
                 self.state = State::Remote;
                 Poll::Pending
             }
@@ -129,13 +126,10 @@ where
                 b.put_slice(buf);
                 let result = self.io.handle.write_overlapped(&b, &mut overlapped);
 
-                match result {
-                    Ok(..) => (),
-                    Err(e) if e.raw_os_error() == Some(crate::errors::ERROR_IO_PENDING) => (),
-                    Err(e) => return Poll::Ready(Err(e)),
+                if let Some(e) = crate::io::handle_io_pending(result, permit, guard, overlapped) {
+                    return Poll::Ready(Err(e));
                 }
 
-                std::mem::forget((permit, guard));
                 self.state = State::Remote;
                 Poll::Pending
             }

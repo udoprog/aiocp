@@ -60,7 +60,7 @@ where
                 pool.reset();
                 let result = self.op.start(&mut self.io.handle, &mut overlapped, pool);
 
-                if let Some(e) = crate::io::handle_io_pending(result, permit, guard) {
+                if let Some(e) = crate::io::handle_io_pending(result, permit, guard, overlapped) {
                     return Poll::Ready(Err(e));
                 }
 
