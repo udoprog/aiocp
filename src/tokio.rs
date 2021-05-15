@@ -70,35 +70,24 @@ where
 
         match self.state {
             State::Local => {
-                let mut overlapped = guard.overlapped();
-                let pool = guard.pool();
-                pool.reset();
+                let pool = guard.clear_and_get_pool();
                 let mut b = pool.take(buf.remaining());
+                let mut overlapped = guard.overlapped();
                 let result = self.io.handle.read_overlapped(&mut b, &mut overlapped);
-
-                if let Some(e) = crate::io::handle_io_pending(result, permit, guard, overlapped) {
-                    return Poll::Ready(Err(e));
-                }
-
+                crate::io::handle_io_pending(result)?;
+                std::mem::forget((permit, guard, overlapped));
                 self.state = State::Remote;
                 Poll::Pending
             }
             State::Remote => {
-                let pool = guard.pool();
-
-                let result = match self.io.result() {
-                    Ok(result) => {
-                        // Safety: this point is synchronized to ensure that no
-                        // remote buffers are used.
-                        let b = unsafe { pool.release(result.bytes_transferred) };
-                        buf.put_slice(b.filled());
-                        Ok(())
-                    }
-                    Err(e) => Err(e),
-                };
-
                 self.state = State::Local;
-                Poll::Ready(result)
+                let pool = guard.pool();
+                let result = self.io.result()?;
+                // Safety: this point is synchronized to ensure that no
+                // remote buffers are used.
+                let b = unsafe { pool.release(result.bytes_transferred) };
+                buf.put_slice(b.filled());
+                Poll::Ready(Ok(()))
             }
         }
     }
@@ -118,32 +107,20 @@ where
 
         match self.state {
             State::Local => {
-                let mut overlapped = guard.overlapped();
-
-                let pool = guard.pool();
-                pool.reset();
+                let pool = guard.clear_and_get_pool();
                 let mut b = pool.take(buf.len());
                 b.put_slice(buf);
+                let mut overlapped = guard.overlapped();
                 let result = self.io.handle.write_overlapped(&b, &mut overlapped);
-
-                if let Some(e) = crate::io::handle_io_pending(result, permit, guard, overlapped) {
-                    return Poll::Ready(Err(e));
-                }
-
+                crate::io::handle_io_pending(result)?;
+                std::mem::forget((permit, guard, overlapped));
                 self.state = State::Remote;
                 Poll::Pending
             }
             State::Remote => {
-                // Safety: we're holding the exclusive lock.
-                let result = self.io.result();
-
-                let result = match result {
-                    Ok(result) => Ok(result.bytes_transferred),
-                    Err(e) => Err(e),
-                };
-
                 self.state = State::Local;
-                Poll::Ready(result)
+                let result = self.io.result()?;
+                Poll::Ready(Ok(result.bytes_transferred))
             }
         }
     }

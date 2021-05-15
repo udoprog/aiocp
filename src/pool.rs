@@ -93,7 +93,7 @@ impl BufferPool {
 
     /// Indicates that there's no pending operations and that this can be safely
     /// reset.
-    pub fn reset(&self) {
+    pub fn clear(&self) {
         self.taken.set(0);
         self.released.set(0);
     }

@@ -10,20 +10,12 @@ use winapi::um::minwinbase;
 /// Helper to deal with I/O pending errors correctly.
 ///
 /// Returns Some(e) if an immediate error should be returned.
-pub(crate) fn handle_io_pending<O>(
-    result: io::Result<O>,
-    permit: crate::sys::CompletionPortPermit<'_>,
-    guard: OverlappedGuard<'_>,
-    overlapped: Overlapped,
-) -> Option<io::Error> {
-    match result {
-        Ok(..) => (),
-        Err(e) if e.raw_os_error() == Some(crate::errors::ERROR_IO_PENDING) => (),
-        Err(e) => return Some(e),
-    }
-
-    std::mem::forget((permit, guard, overlapped));
-    None
+pub(crate) fn handle_io_pending<O>(result: io::Result<O>) -> io::Result<Option<O>> {
+    Ok(match result {
+        Ok(output) => Some(output),
+        Err(e) if e.raw_os_error() == Some(crate::errors::ERROR_IO_PENDING) => None,
+        Err(e) => return Err(e),
+    })
 }
 
 /// An overlapped structure.
@@ -131,13 +123,20 @@ pub(crate) struct OverlappedGuard<'a> {
 }
 
 impl OverlappedGuard<'_> {
+    /// Clear and return the current pool.
+    pub fn clear_and_get_pool(&self) -> &BufferPool {
+        let pool = self.pool();
+        pool.clear();
+        pool
+    }
+
     /// Access the pool associated with the locked state of the header.
-    pub(crate) fn pool(&self) -> &BufferPool {
+    pub fn pool(&self) -> &BufferPool {
         &self.header.pool
     }
 
     /// Get the current header as an overlapped pointer.
-    pub(crate) fn overlapped(&self) -> Overlapped {
+    pub fn overlapped(&self) -> Overlapped {
         Overlapped::from_raw(
             Arc::into_raw(self.header.clone()) as *const minwinbase::OVERLAPPED as *mut _,
         )
@@ -146,7 +145,7 @@ impl OverlappedGuard<'_> {
 
 impl Drop for OverlappedGuard<'_> {
     fn drop(&mut self) {
-        self.pool().reset();
+        self.pool().clear();
         self.header.unlock();
     }
 }
