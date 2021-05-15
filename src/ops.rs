@@ -6,10 +6,30 @@ use crate::pool::BufferPool;
 use std::io;
 use std::os::windows::io::AsRawHandle;
 
+pub const READ: Code = Code(0x7f_ff_ff_01);
+pub const WRITE: Code = Code(0x7f_ff_ff_02);
+pub const IO_CTL: Code = Code(0x7f_ff_ff_03);
+pub const CONNECT_NAMED_PIPE: Code = Code(0x7f_ff_ff_04);
+
+/// A unique code that designates exactly how any one given overlapped result
+/// must be treated. This has safety implications, because treating the
+/// overlapped results of something like a WRITE as a READ instead could result
+/// in assuming that uninitialized memory has been initialized by the write
+/// operation.
+pub struct Code(pub(crate) u32);
+
 /// The model for a single I/O operation.
-pub trait OverlappedOperation<H> {
+///
+/// # Safety
+///
+/// The implementor must assert that the code used is appropriate for the kind
+/// of operation and buffer assumptions that it tries to do.
+pub unsafe trait OverlappedOperation<H> {
     /// The output of the operation.
     type Output;
+
+    /// The lock code to use for the operation.
+    const CODE: Code;
 
     /// Prepare the I/O operation. This typicall runs the function or system
     /// call which requires access to the `OVERLAPPED` structure and memory
@@ -38,12 +58,13 @@ impl<B> Write<B> {
     }
 }
 
-impl<H, B> OverlappedOperation<H> for Write<B>
+unsafe impl<H, B> OverlappedOperation<H> for Write<B>
 where
     H: AsRawHandle,
     B: AsRef<[u8]>,
 {
     type Output = usize;
+    const CODE: Code = WRITE;
 
     fn prepare(
         &mut self,
@@ -76,12 +97,13 @@ impl<B> Read<B> {
     }
 }
 
-impl<H, B> OverlappedOperation<H> for Read<B>
+unsafe impl<H, B> OverlappedOperation<H> for Read<B>
 where
     H: AsRawHandle,
     B: AsMut<[u8]>,
 {
     type Output = usize;
+    const CODE: Code = READ;
 
     fn prepare(
         &mut self,
@@ -113,11 +135,12 @@ impl ConnectNamedPipe {
     }
 }
 
-impl<H> OverlappedOperation<H> for ConnectNamedPipe
+unsafe impl<H> OverlappedOperation<H> for ConnectNamedPipe
 where
     H: AsRawHandle,
 {
     type Output = ();
+    const CODE: Code = CONNECT_NAMED_PIPE;
 
     fn prepare(
         &mut self,
@@ -144,12 +167,13 @@ impl<M> DeviceIoCtl<M> {
     }
 }
 
-impl<H, M> OverlappedOperation<H> for DeviceIoCtl<M>
+unsafe impl<H, M> OverlappedOperation<H> for DeviceIoCtl<M>
 where
     H: AsRawHandle,
     M: ioctl::Ioctl,
 {
     type Output = usize;
+    const CODE: Code = IO_CTL;
 
     fn prepare(
         &mut self,

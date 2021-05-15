@@ -1,17 +1,12 @@
 use crate::ext::HandleExt as _;
+use crate::operation::State;
+use crate::ops;
 use crate::overlapped_handle::OverlappedHandle;
 use std::io;
 use std::os::windows::io::AsRawHandle;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
-
-/// State that can be used to embed a reader.
-#[derive(Debug, Clone, Copy)]
-enum State {
-    Local,
-    Remote,
-}
 
 /// Wrap a [OverlappedHandle] into a Tokio-compatible type that implements
 /// [AsyncRead][tokio::io::AsyncRead] and [AsyncWrite][tokio::io::AsyncWrite].
@@ -28,8 +23,8 @@ pub struct Io<'a, H>
 where
     H: AsRawHandle,
 {
-    io: &'a mut OverlappedHandle<H>,
     state: State,
+    io: &'a mut OverlappedHandle<H>,
 }
 
 impl<'a, H> Io<'a, H>
@@ -38,8 +33,8 @@ where
 {
     fn new(io: &'a mut OverlappedHandle<H>) -> Self {
         Self {
-            io,
             state: State::Local,
+            io,
         }
     }
 
@@ -61,11 +56,9 @@ where
         let permit = self.io.port.permit()?;
         self.io.register_by_ref(cx.waker());
 
-        let guard = match self.io.header.lock() {
+        let guard = match self.io.header.lock(ops::READ) {
             Some(guard) => guard,
-            None => {
-                return Poll::Pending;
-            }
+            None => return Poll::Pending,
         };
 
         match self.state {
@@ -100,7 +93,7 @@ where
         let permit = self.io.port.permit()?;
         self.io.register_by_ref(cx.waker());
 
-        let guard = match self.io.header.lock() {
+        let guard = match self.io.header.lock(ops::WRITE) {
             Some(guard) => guard,
             None => return Poll::Pending,
         };

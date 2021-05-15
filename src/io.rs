@@ -1,9 +1,10 @@
 use crate::atomic_waker::AtomicWaker;
+use crate::ops;
 use crate::pool::BufferPool;
 use std::cell::UnsafeCell;
 use std::io;
 use std::mem;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
 use winapi::um::minwinbase;
 
@@ -53,7 +54,7 @@ impl Drop for Overlapped {
 pub(crate) struct OverlappedHeader {
     pub(crate) raw: UnsafeCell<minwinbase::OVERLAPPED>,
     pool: BufferPool,
-    lock: AtomicBool,
+    lock: AtomicI64,
     pub(crate) waker: AtomicWaker,
 }
 
@@ -63,7 +64,7 @@ impl OverlappedHeader {
             // Safety: OVERLAPPED structure is valid when zeroed.
             raw: unsafe { mem::MaybeUninit::zeroed().assume_init() },
             pool: BufferPool::new(),
-            lock: AtomicBool::new(false),
+            lock: AtomicI64::new(0),
             waker: AtomicWaker::new(),
         }
     }
@@ -90,9 +91,29 @@ impl OverlappedHeader {
 
     /// Try to lock the overlap and return the pointer to the associated
     /// overlapped struct.
-    pub(crate) fn lock<'a>(self: &'a Arc<Self>) -> Option<OverlappedGuard<'a>> {
-        if self.lock.swap(true, Ordering::SeqCst) {
-            return None;
+    pub(crate) fn lock<'a>(
+        self: &'a Arc<Self>,
+        ops::Code(id): ops::Code,
+    ) -> Option<OverlappedGuard<'a>> {
+        let id = id as i64 + 1; // to ensure that we never use 0
+
+        while let Err(n) =
+            self.lock
+                .compare_exchange_weak(0, id, Ordering::SeqCst, Ordering::Relaxed)
+        {
+            // Already locked, either by our kind of operation or someone else.
+            if n > 0 || id != -n {
+                return None;
+            }
+
+            // Attempt to unlock something specifically locked for us.
+            let op = self
+                .lock
+                .compare_exchange_weak(n, id, Ordering::SeqCst, Ordering::Relaxed);
+
+            if op.is_ok() {
+                break;
+            }
         }
 
         Some(OverlappedGuard { header: self })
@@ -101,10 +122,21 @@ impl OverlappedHeader {
     /// Unlock access to resources associated with this operation.
     #[inline]
     pub fn unlock(&self) -> bool {
-        // Safety: This is only accessible at positions in the program where
-        // resources are no longer in use by the operating system, so this
-        // cannot be incorrectly used.
-        self.lock.swap(false, Ordering::SeqCst)
+        let mut old = self.lock.load(Ordering::Relaxed);
+
+        while old > 0 {
+            if let Err(o) =
+                self.lock
+                    .compare_exchange_weak(old, -old, Ordering::SeqCst, Ordering::Relaxed)
+            {
+                old = o;
+                continue;
+            }
+
+            return true;
+        }
+
+        false
     }
 
     /// Wake the async task waiting for this I/O to complete.

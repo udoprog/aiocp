@@ -6,7 +6,7 @@ use std::task::{Context, Poll};
 
 /// The internal state of the driver.
 #[derive(Debug)]
-enum State {
+pub(crate) enum State {
     /// The driver currently owns the operation. The critical section associated
     /// with the operation is owned by the driver.
     Local,
@@ -48,7 +48,7 @@ where
         let permit = self.io.port.permit()?;
         self.io.register_by_ref(cx.waker());
 
-        let guard = match self.io.header.lock() {
+        let guard = match self.io.header.lock(O::CODE) {
             Some(guard) => guard,
             None => return Poll::Pending,
         };
