@@ -58,8 +58,12 @@ where
                 let mut overlapped = guard.overlapped();
                 let pool = guard.pool();
                 pool.reset();
-                let _ = self.op.start(&mut self.io.handle, &mut overlapped, pool);
-                std::mem::forget((permit, guard));
+                let result = self.op.start(&mut self.io.handle, &mut overlapped, pool);
+
+                if let Some(e) = crate::io::handle_io_pending(result, permit, guard) {
+                    return Poll::Ready(Err(e));
+                }
+
                 self.state = State::Remote;
                 Poll::Pending
             }

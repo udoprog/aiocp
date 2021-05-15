@@ -1,9 +1,19 @@
 #[macro_use]
 mod macros;
 
+#[cfg(not(docsrs))]
+#[path = "sys/sys.rs"]
+mod sys;
+
+#[cfg(docsrs)]
+#[path = "sys/doc.rs"]
+mod sys;
+
 mod atomic_waker;
 
 pub mod flags;
+
+mod errors;
 
 mod ext;
 pub use self::ext::HandleExt;
@@ -30,8 +40,7 @@ pub use self::pool::BufferPool;
 mod handle;
 pub use self::handle::Handle;
 
-mod pipe;
-pub use self::pipe::CreatePipeOptions;
+pub mod pipe;
 
 pub mod ioctl;
 

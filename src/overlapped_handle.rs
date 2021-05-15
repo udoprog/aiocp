@@ -1,4 +1,3 @@
-use crate::completion_port::CompletionPort;
 use crate::io::OverlappedHeader;
 use crate::ioctl;
 use crate::operation::Operation;
@@ -26,7 +25,7 @@ pub struct OverlappedResult {
 /// A wrapped handle able to perform overlapped operations.
 pub struct OverlappedHandle<H> {
     pub(crate) handle: H,
-    pub(crate) port: CompletionPort,
+    pub(crate) port: crate::sys::CompletionPort,
     pub(crate) header: Arc<OverlappedHeader>,
 }
 
@@ -36,7 +35,7 @@ unsafe impl<H> Sync for OverlappedHandle<H> where H: Sync {}
 impl<H> OverlappedHandle<H> {
     /// Construct a zeroed overlapped structure with the given buffers available
     /// for performing operations over.
-    pub(crate) fn new(handle: H, port: CompletionPort) -> Self {
+    pub(crate) fn new(handle: H, port: crate::sys::CompletionPort) -> Self {
         Self {
             handle,
             port,

@@ -55,6 +55,12 @@ where
                 let len = DWORD::try_from(buf.len()).unwrap_or(DWORD::MAX);
                 let mut n = mem::MaybeUninit::zeroed();
 
+                trace! {
+                    overlapped = ?overlapped.as_ptr(),
+                    len = len,
+                    "read_overlapped",
+                };
+
                 let result = fileapi::ReadFile(
                     self.as_raw_handle() as *mut _,
                     buf.as_mut_ptr() as *mut _,

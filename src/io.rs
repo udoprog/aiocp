@@ -1,10 +1,29 @@
 use crate::atomic_waker::AtomicWaker;
 use crate::pool::BufferPool;
 use std::cell::UnsafeCell;
+use std::io;
 use std::mem;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use winapi::um::minwinbase;
+
+/// Helper to deal with I/O pending errors correctly.
+///
+/// Returns Some(e) if an immediate error should be returned.
+pub(crate) fn handle_io_pending<O>(
+    result: io::Result<O>,
+    permit: crate::sys::CompletionPortPermit<'_>,
+    guard: OverlappedGuard<'_>,
+) -> Option<io::Error> {
+    match result {
+        Ok(..) => (),
+        Err(e) if e.raw_os_error() == Some(crate::errors::ERROR_IO_PENDING) => (),
+        Err(e) => return Some(e),
+    }
+
+    std::mem::forget((permit, guard));
+    None
+}
 
 /// An overlapped structure.
 #[derive(Debug)]

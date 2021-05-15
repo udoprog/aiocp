@@ -13,6 +13,15 @@ enum State {
     Remote,
 }
 
+/// Wrap a [OverlappedHandle] into a Tokio-compatible type that implements
+/// [AsyncRead][tokio::io::AsyncRead] and [AsyncWrite][tokio::io::AsyncWrite].
+pub fn io<H>(handle: &mut OverlappedHandle<H>) -> Io<'_, H>
+where
+    H: AsRawHandle,
+{
+    Io::new(handle)
+}
+
 /// A tokio wrapper around the given overlapped handle that enables support for
 /// [AsyncRead] and [AsyncWrite].
 pub struct Io<'a, H>
@@ -27,14 +36,21 @@ impl<'a, H> Io<'a, H>
 where
     H: AsRawHandle,
 {
-    /// Wrap a [OverlappedHandle] into a Tokio-compatible type that implements
-    /// [AsyncRead][tokio::io::AsyncRead] and
-    /// [AsyncWrite][tokio::io::AsyncWrite].
-    pub fn new(io: &'a mut OverlappedHandle<H>) -> Self {
+    fn new(io: &'a mut OverlappedHandle<H>) -> Self {
         Self {
             io,
             state: State::Local,
         }
+    }
+
+    /// Get a reference to the underlying overlapped handle.
+    pub fn as_ref(&self) -> &OverlappedHandle<H> {
+        self.io
+    }
+
+    /// Get a mutable reference to the underlying overlapped handle.
+    pub fn as_mut(&mut self) -> &mut OverlappedHandle<H> {
+        self.io
     }
 
     fn poll_read(&mut self, cx: &mut Context<'_>, buf: &mut ReadBuf<'_>) -> Poll<io::Result<()>>
@@ -58,7 +74,14 @@ where
                 let pool = guard.pool();
                 pool.reset();
                 let mut b = pool.take(buf.remaining());
-                let _ = self.io.handle.read_overlapped(&mut b, &mut overlapped);
+                let result = self.io.handle.read_overlapped(&mut b, &mut overlapped);
+
+                match result {
+                    Ok(..) => (),
+                    Err(e) if e.raw_os_error() == Some(crate::errors::ERROR_IO_PENDING) => (),
+                    Err(e) => return Poll::Ready(Err(e)),
+                }
+
                 std::mem::forget((permit, guard));
                 self.state = State::Remote;
                 Poll::Pending
@@ -71,7 +94,6 @@ where
                         // Safety: this point is synchronized to ensure that no
                         // remote buffers are used.
                         let b = unsafe { pool.release(result.bytes_transferred) };
-                        println!("{}", b.filled().len());
                         buf.put_slice(b.filled());
                         Ok(())
                     }
@@ -105,7 +127,14 @@ where
                 pool.reset();
                 let mut b = pool.take(buf.len());
                 b.put_slice(buf);
-                let _ = self.io.handle.write_overlapped(&b, &mut overlapped);
+                let result = self.io.handle.write_overlapped(&b, &mut overlapped);
+
+                match result {
+                    Ok(..) => (),
+                    Err(e) if e.raw_os_error() == Some(crate::errors::ERROR_IO_PENDING) => (),
+                    Err(e) => return Poll::Ready(Err(e)),
+                }
+
                 std::mem::forget((permit, guard));
                 self.state = State::Remote;
                 Poll::Pending

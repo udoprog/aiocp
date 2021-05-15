@@ -47,7 +47,7 @@ macro_rules! bool_flag {
 /// options. This is required to use for named pipe servers who wants to modify
 /// pipe-related options.
 ///
-/// See [CreatePipeOptions::open].
+/// See [CreatePipeOptions::create].
 #[derive(Debug, Clone)]
 pub struct CreatePipeOptions {
     open_mode: DWORD,
@@ -56,13 +56,14 @@ pub struct CreatePipeOptions {
     out_buffer_size: DWORD,
     in_buffer_size: DWORD,
     default_timeout: DWORD,
+    custom_flags: u32,
 }
 
 impl CreatePipeOptions {
     /// Creates a new named pipe builder with the default settings.
     ///
     /// ```
-    /// use aiocp::CreatePipeOptions;
+    /// use aiocp::pipe::CreatePipeOptions;
     ///
     /// const PIPE_NAME: &str = r"\\.\pipe\aiocp-new";
     ///
@@ -72,12 +73,13 @@ impl CreatePipeOptions {
     /// ```
     pub fn new() -> CreatePipeOptions {
         CreatePipeOptions {
-            open_mode: winbase::PIPE_ACCESS_DUPLEX | winbase::FILE_FLAG_OVERLAPPED,
+            open_mode: winbase::PIPE_ACCESS_DUPLEX,
             pipe_mode: winbase::PIPE_TYPE_BYTE | winbase::PIPE_REJECT_REMOTE_CLIENTS,
             max_instances: winbase::PIPE_UNLIMITED_INSTANCES,
             out_buffer_size: 65536,
             in_buffer_size: 65536,
             default_timeout: 0,
+            custom_flags: 0,
         }
     }
 
@@ -107,21 +109,29 @@ impl CreatePipeOptions {
     /// # Examples
     ///
     /// ```
+    /// use aiocp::pipe::CreatePipeOptions;
+    /// use std::fs::OpenOptions;
     /// use std::io;
+    /// use std::os::windows::fs::OpenOptionsExt as _;
     /// use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
-    /// use aiocp::{OpenOptions, CreatePipeOptions};
     ///
     /// const PIPE_NAME: &str = r"\\.\pipe\aiocp-access-inbound";
     ///
     /// # #[tokio::main] async fn main() -> io::Result<()> {
+    /// let (port, handle) = aiocp::setup(2)?;
+    ///
     /// // Server side prevents connecting by denying inbound access, client errors
     /// // when attempting to open the connection.
     /// {
     ///     let _server = CreatePipeOptions::new()
+    ///         .custom_flags(aiocp::flags::FILE_FLAG_OVERLAPPED)
     ///         .access_inbound(false)
     ///         .create(PIPE_NAME)?;
     ///
     ///     let e = OpenOptions::new()
+    ///         .custom_flags(aiocp::flags::FILE_FLAG_OVERLAPPED)
+    ///         .read(true)
+    ///         .write(true)
     ///         .open(PIPE_NAME)
     ///         .unwrap_err();
     ///
@@ -129,9 +139,13 @@ impl CreatePipeOptions {
     ///
     ///     // Disabling writing allows a client to connect, but leads to runtime
     ///     // error if a write is attempted.
-    ///     let mut client = OpenOptions::new()
-    ///         .write(false)
+    ///     let client = OpenOptions::new()
+    ///         .custom_flags(aiocp::flags::FILE_FLAG_OVERLAPPED)
+    ///         .read(true)
     ///         .open(PIPE_NAME)?;
+    ///
+    ///     let mut client = port.register(client, 0)?;
+    ///     let mut client = aiocp::tokio::io(&mut client);
     ///
     ///     let e = client.write(b"ping").await.unwrap_err();
     ///     assert_eq!(e.kind(), io::ErrorKind::PermissionDenied);
@@ -139,13 +153,21 @@ impl CreatePipeOptions {
     ///
     /// // A functional, unidirectional server-to-client only communication.
     /// {
-    ///     let mut server = CreatePipeOptions::new()
+    ///     let server = CreatePipeOptions::new()
+    ///         .custom_flags(aiocp::flags::FILE_FLAG_OVERLAPPED)
     ///         .access_inbound(false)
     ///         .create(PIPE_NAME)?;
     ///
-    ///     let mut client = OpenOptions::new()
-    ///         .write(false)
+    ///     let mut server = port.register(server, 0)?;
+    ///     let mut server = aiocp::tokio::io(&mut server);
+    ///
+    ///     let client = OpenOptions::new()
+    ///         .custom_flags(aiocp::flags::FILE_FLAG_OVERLAPPED)
+    ///         .read(true)
     ///         .open(PIPE_NAME)?;
+    ///
+    ///     let mut client = port.register(client, 0)?;
+    ///     let mut client = aiocp::tokio::io(&mut client);
     ///
     ///     let write = server.write_all(b"ping");
     ///
@@ -157,6 +179,9 @@ impl CreatePipeOptions {
     ///     assert_eq!(read, 4);
     ///     assert_eq!(&buf[..], b"ping");
     /// }
+    ///
+    /// port.shutdown()?;
+    /// handle.join()?;
     /// # Ok(()) }
     /// ```
     pub fn access_inbound(&mut self, allowed: bool) -> &mut Self {
@@ -173,21 +198,29 @@ impl CreatePipeOptions {
     /// # Examples
     ///
     /// ```
+    /// use aiocp::pipe::CreatePipeOptions;
+    /// use std::fs::OpenOptions;
     /// use std::io;
+    /// use std::os::windows::fs::OpenOptionsExt as _;
     /// use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
-    /// use aiocp::{OpenOptions, CreatePipeOptions};
     ///
     /// const PIPE_NAME: &str = r"\\.\pipe\aiocp-access-outbound";
     ///
     /// # #[tokio::main] async fn main() -> io::Result<()> {
+    /// let (port, handle) = aiocp::setup(2)?;
+    ///
     /// // Server side prevents connecting by denying outbound access, client errors
     /// // when attempting to open the connection.
     /// {
     ///     let _server = CreatePipeOptions::new()
+    ///         .custom_flags(aiocp::flags::FILE_FLAG_OVERLAPPED)
     ///         .access_outbound(false)
     ///         .create(PIPE_NAME)?;
     ///
     ///     let e = OpenOptions::new()
+    ///         .custom_flags(aiocp::flags::FILE_FLAG_OVERLAPPED)
+    ///         .read(true)
+    ///         .write(true)
     ///         .open(PIPE_NAME)
     ///         .unwrap_err();
     ///
@@ -195,7 +228,13 @@ impl CreatePipeOptions {
     ///
     ///     // Disabling reading allows a client to connect, but leads to runtime
     ///     // error if a read is attempted.
-    ///     let mut client = OpenOptions::new().read(false).open(PIPE_NAME)?;
+    ///     let mut client = OpenOptions::new()
+    ///         .custom_flags(aiocp::flags::FILE_FLAG_OVERLAPPED)
+    ///         .write(true)
+    ///         .open(PIPE_NAME)?;
+    ///
+    ///     let mut client = port.register(client, 0)?;
+    ///     let mut client = aiocp::tokio::io(&mut client);
     ///
     ///     let mut buf = [0u8; 4];
     ///     let e = client.read(&mut buf).await.unwrap_err();
@@ -204,14 +243,21 @@ impl CreatePipeOptions {
     ///
     /// // A functional, unidirectional client-to-server only communication.
     /// {
-    ///     let mut server = CreatePipeOptions::new().access_outbound(false).create(PIPE_NAME)?;
-    ///     let mut client = OpenOptions::new().read(false).open(PIPE_NAME)?;
+    ///     let server = CreatePipeOptions::new()
+    ///         .custom_flags(aiocp::flags::FILE_FLAG_OVERLAPPED)
+    ///         .access_outbound(false)
+    ///         .create(PIPE_NAME)?;
     ///
-    ///     // TODO: Explain why this test doesn't work without calling connect
-    ///     // first.
-    ///     //
-    ///     // Because I have no idea -- udoprog
-    ///     server.connect().await?;
+    ///     let mut server = port.register(server, 0)?;
+    ///     let mut server = aiocp::tokio::io(&mut server);
+    ///
+    ///     let client = OpenOptions::new()
+    ///         .custom_flags(aiocp::flags::FILE_FLAG_OVERLAPPED)
+    ///         .write(true)
+    ///         .open(PIPE_NAME)?;
+    ///
+    ///     let mut client = port.register(client, 0)?;
+    ///     let mut client = aiocp::tokio::io(&mut client);
     ///
     ///     let write = client.write_all(b"ping");
     ///
@@ -220,11 +266,12 @@ impl CreatePipeOptions {
     ///
     ///     let ((), read) = tokio::try_join!(write, read)?;
     ///
-    ///     println!("done reading and writing");
-    ///
     ///     assert_eq!(read, 4);
     ///     assert_eq!(&buf[..], b"ping");
     /// }
+    ///
+    /// port.shutdown()?;
+    /// handle.join()?;
     /// # Ok(()) }
     /// ```
     pub fn access_outbound(&mut self, allowed: bool) -> &mut Self {
@@ -245,12 +292,13 @@ impl CreatePipeOptions {
     ///
     /// ```
     /// use std::io;
-    /// use aiocp::CreatePipeOptions;
+    /// use aiocp::pipe::CreatePipeOptions;
     ///
     /// const PIPE_NAME: &str = r"\\.\pipe\aiocp-first-instance";
     ///
     /// # #[tokio::main] async fn main() -> io::Result<()> {
     /// let mut builder = CreatePipeOptions::new();
+    /// builder.custom_flags(aiocp::flags::FILE_FLAG_OVERLAPPED);
     /// builder.first_pipe_instance(true);
     ///
     /// let server = builder.create(PIPE_NAME)?;
@@ -298,7 +346,7 @@ impl CreatePipeOptions {
     /// you do not wish to set an instance limit, leave it unspecified.
     ///
     /// ```should_panic
-    /// use aiocp::CreatePipeOptions;
+    /// use aiocp::pipe::CreatePipeOptions;
     ///
     /// # #[tokio::main] async fn main() -> std::io::Result<()> {
     /// let builder = CreatePipeOptions::new().max_instances(255);
@@ -342,18 +390,20 @@ impl CreatePipeOptions {
     /// This errors if called outside of a [Tokio Runtime] which doesn't have
     /// [I/O enabled] or if any OS-specific I/O errors occur.
     ///
-    /// [Tokio Runtime]: crate::runtime::Runtime
-    /// [I/O enabled]: crate::runtime::Builder::enable_io
+    /// [Tokio Runtime]: tokio::runtime::Runtime
+    /// [I/O enabled]: tokio::runtime::Builder::enable_io
     ///
     /// # Examples
     ///
     /// ```
-    /// use aiocp::CreatePipeOptions;
+    /// use aiocp::pipe::CreatePipeOptions;
     ///
     /// const PIPE_NAME: &str = r"\\.\pipe\aiocp-open";
     ///
     /// # #[tokio::main] async fn main() -> std::io::Result<()> {
-    /// let server = CreatePipeOptions::new().create(PIPE_NAME)?;
+    /// let server = CreatePipeOptions::new()
+    ///     .custom_flags(aiocp::flags::FILE_FLAG_OVERLAPPED)
+    ///     .create(PIPE_NAME)?;
     /// # Ok(()) }
     /// ```
     pub fn create(&self, addr: impl AsRef<OsStr>) -> io::Result<Handle> {
@@ -362,9 +412,18 @@ impl CreatePipeOptions {
         unsafe { self.create_with_security_attributes(addr, ptr::null_mut()) }
     }
 
+    /// Sets extra flags for the `dwOpenMode` argument to the call to
+    /// [CreateNamedPipe] to the specified value.
+    ///
+    /// [CreateNamedPipe]: https://docs.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-createnamedpipea
+    pub fn custom_flags(&mut self, flags: u32) -> &mut Self {
+        self.custom_flags = flags;
+        self
+    }
+
     /// Create the named pipe identified by `addr` for use as a server.
     ///
-    /// This is the same as [open][CreatePipeOptions::open] except that it
+    /// This is the same as [open][CreatePipeOptions::create] except that it
     /// supports providing security attributes.
     ///
     /// # Errors
@@ -372,8 +431,8 @@ impl CreatePipeOptions {
     /// This errors if called outside of a [Tokio Runtime] which doesn't have
     /// [I/O enabled] or if any OS-specific I/O errors occur.
     ///
-    /// [Tokio Runtime]: crate::runtime::Runtime
-    /// [I/O enabled]: crate::runtime::Builder::enable_io
+    /// [Tokio Runtime]: tokio::runtime::Runtime
+    /// [I/O enabled]: tokio::runtime::Builder::enable_io
     ///
     /// # Safety
     ///
@@ -390,7 +449,7 @@ impl CreatePipeOptions {
 
         let handle = namedpipeapi::CreateNamedPipeW(
             addr.as_ptr(),
-            self.open_mode,
+            self.custom_flags | self.open_mode,
             self.pipe_mode,
             self.max_instances,
             self.out_buffer_size,
