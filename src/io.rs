@@ -89,12 +89,6 @@ impl OverlappedHeader {
     }
 }
 
-impl Drop for OverlappedHeader {
-    fn drop(&mut self) {
-        unsafe { (*self.pool.get()).drop_in_place() }
-    }
-}
-
 /// A lock guard that will unlock the resource if dropped.
 ///
 /// Dropping the guard automatically clears the available buffers and unlocks

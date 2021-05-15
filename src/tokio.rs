@@ -68,8 +68,11 @@ where
 
                 let result = match self.io.result() {
                     Ok(result) => {
-                        let b = pool.release(result.bytes_transferred);
-                        buf.put_slice(b.as_ref());
+                        // Safety: this point is synchronized to ensure that no
+                        // remote buffers are used.
+                        let b = unsafe { pool.release(result.bytes_transferred) };
+                        println!("{}", b.filled().len());
+                        buf.put_slice(b.filled());
                         Ok(())
                     }
                     Err(e) => Err(e),
@@ -101,7 +104,7 @@ where
                 let pool = guard.pool();
                 pool.reset();
                 let mut b = pool.take(buf.len());
-                b.copy_from(buf);
+                b.put_slice(buf);
                 let _ = self.io.handle.write_overlapped(&b, &mut overlapped);
                 std::mem::forget((permit, guard));
                 self.state = State::Remote;

@@ -22,9 +22,6 @@ pub use self::operation::Operation;
 mod overlapped_handle;
 pub use self::overlapped_handle::{OverlappedHandle, OverlappedResult};
 
-mod buf;
-pub use self::buf::Buf;
-
 pub mod ops;
 
 mod pool;
@@ -38,7 +35,6 @@ pub use self::pipe::CreatePipeOptions;
 
 pub mod ioctl;
 
-#[cfg(feature = "tokio")]
 pub mod tokio;
 
 #[cfg(feature = "background")]

@@ -56,7 +56,7 @@ where
     ) -> io::Result<Self::Output> {
         let buf = self.buf.as_ref();
         let mut b = pool.take(buf.len());
-        b.copy_from(buf.as_ref());
+        b.put_slice(buf);
         handle.write_overlapped(&mut b, overlapped)
     }
 
@@ -94,8 +94,10 @@ where
     ) -> io::Result<Self::Output> {
         let mut b = pool.take(self.buf.as_mut().len());
         handle.read_overlapped(&mut b, overlapped)?;
-        self.buf.as_mut()[..b.len()].copy_from_slice(b.as_ref());
-        Ok(b.len())
+
+        let filled = b.filled();
+        self.buf.as_mut()[..filled.len()].copy_from_slice(filled);
+        Ok(filled.len())
     }
 
     fn result(
@@ -103,9 +105,11 @@ where
         result: OverlappedResult,
         pool: &mut BufferPool,
     ) -> io::Result<Self::Output> {
-        let b = pool.release(result.bytes_transferred);
-        self.buf.as_mut()[..b.len()].copy_from_slice(b.as_ref());
-        Ok(b.len())
+        let b = unsafe { pool.release(result.bytes_transferred) };
+
+        let filled = b.filled();
+        self.buf.as_mut()[..filled.len()].copy_from_slice(filled);
+        Ok(filled.len())
     }
 }
 
@@ -169,7 +173,7 @@ where
         let len = self.0.len();
         let mut buf = pool.take(len);
         // serialize request.
-        buf.copy_from(unsafe { slice::from_raw_parts(&self.0 as *const _ as *const u8, len) });
+        buf.put_slice(unsafe { slice::from_raw_parts(&self.0 as *const _ as *const u8, len) });
         handle.device_io_control_overlapped(M::CONTROL, Some(&mut buf), None, overlapped)
     }
 

@@ -1,10 +1,10 @@
-use crate::buf::Buf;
 use crate::io::Overlapped;
 use std::convert::TryFrom as _;
 use std::io;
 use std::mem;
 use std::os::windows::io::AsRawHandle;
 use std::ptr;
+use tokio::io::ReadBuf;
 use winapi::shared::minwindef::{DWORD, FALSE};
 use winapi::um::fileapi;
 use winapi::um::ioapiset;
@@ -13,10 +13,18 @@ use winapi::um::namedpipeapi;
 /// Windows-specific trait for writing to a HANDLE.
 pub trait HandleExt {
     /// Perform an overlapped read over the current I/O object.
-    fn read_overlapped(&mut self, buf: &mut Buf, overlapped: &mut Overlapped) -> io::Result<()>;
+    fn read_overlapped(
+        &mut self,
+        buf: &mut ReadBuf<'_>,
+        overlapped: &mut Overlapped,
+    ) -> io::Result<()>;
 
     /// Perform an overlapped write over the current I/O object.
-    fn write_overlapped(&mut self, buf: &Buf, overlapped: &mut Overlapped) -> io::Result<usize>;
+    fn write_overlapped(
+        &mut self,
+        buf: &ReadBuf<'_>,
+        overlapped: &mut Overlapped,
+    ) -> io::Result<usize>;
 
     /// Perform an overlapped connect over the current I/O object under the
     /// assumption that it is a named pipe.
@@ -26,8 +34,8 @@ pub trait HandleExt {
     fn device_io_control_overlapped(
         &mut self,
         io_control_code: u32,
-        in_buffer: Option<&Buf>,
-        out_buffer: Option<&mut Buf>,
+        in_buffer: Option<&ReadBuf<'_>>,
+        out_buffer: Option<&mut ReadBuf<'_>>,
         overlapped: &mut Overlapped,
     ) -> io::Result<usize>;
 }
@@ -36,31 +44,45 @@ impl<O> HandleExt for O
 where
     O: AsRawHandle,
 {
-    fn read_overlapped(&mut self, buf: &mut Buf, overlapped: &mut Overlapped) -> io::Result<()> {
+    fn read_overlapped(
+        &mut self,
+        buf: &mut ReadBuf<'_>,
+        overlapped: &mut Overlapped,
+    ) -> io::Result<()> {
         unsafe {
-            let len = DWORD::try_from(buf.len()).unwrap_or(DWORD::MAX);
-            let mut n = mem::MaybeUninit::zeroed();
+            let n = {
+                let buf = buf.unfilled_mut();
+                let len = DWORD::try_from(buf.len()).unwrap_or(DWORD::MAX);
+                let mut n = mem::MaybeUninit::zeroed();
 
-            let result = fileapi::ReadFile(
-                self.as_raw_handle() as *mut _,
-                buf.as_mut_ptr() as *mut _,
-                len,
-                n.as_mut_ptr(),
-                overlapped.as_ptr(),
-            );
+                let result = fileapi::ReadFile(
+                    self.as_raw_handle() as *mut _,
+                    buf.as_mut_ptr() as *mut _,
+                    len,
+                    n.as_mut_ptr(),
+                    overlapped.as_ptr(),
+                );
 
-            if result == FALSE {
-                return Err(io::Error::last_os_error());
-            }
+                if result == FALSE {
+                    return Err(io::Error::last_os_error());
+                }
 
-            let n = usize::try_from(n.assume_init()).expect("read count oob");
-            buf.set_len(n);
+                usize::try_from(n.assume_init()).expect("read count oob")
+            };
+
+            buf.assume_init(n);
+            buf.advance(n);
             Ok(())
         }
     }
 
-    fn write_overlapped(&mut self, buf: &Buf, overlapped: &mut Overlapped) -> io::Result<usize> {
+    fn write_overlapped(
+        &mut self,
+        buf: &ReadBuf<'_>,
+        overlapped: &mut Overlapped,
+    ) -> io::Result<usize> {
         unsafe {
+            let buf = buf.filled();
             let len = DWORD::try_from(buf.len()).unwrap_or(DWORD::MAX);
             let mut n = mem::MaybeUninit::zeroed();
 
@@ -76,8 +98,7 @@ where
                 return Err(io::Error::last_os_error());
             }
 
-            let n = usize::try_from(n.assume_init()).expect("written count oob");
-            Ok(n)
+            Ok(usize::try_from(n.assume_init()).expect("written count oob"))
         }
     }
 
@@ -97,8 +118,8 @@ where
     fn device_io_control_overlapped(
         &mut self,
         io_control_code: u32,
-        in_buffer: Option<&Buf>,
-        out_buffer: Option<&mut Buf>,
+        in_buffer: Option<&ReadBuf<'_>>,
+        out_buffer: Option<&mut ReadBuf<'_>>,
         overlapped: &mut Overlapped,
     ) -> io::Result<usize> {
         unsafe {
@@ -106,6 +127,7 @@ where
 
             let (in_buffer, in_buffer_len) = match in_buffer {
                 Some(buf) => {
+                    let buf = buf.filled();
                     let len = DWORD::try_from(buf.len()).expect("input buffer oob");
                     (buf.as_ptr() as *const _ as *mut _, len)
                 }
@@ -114,6 +136,7 @@ where
 
             let (out_buffer, out_buffer_len) = match out_buffer {
                 Some(buf) => {
+                    let buf = buf.unfilled_mut();
                     let len = DWORD::try_from(buf.len()).expect("input buffer oob");
                     (buf.as_mut_ptr() as *mut _, len)
                 }
