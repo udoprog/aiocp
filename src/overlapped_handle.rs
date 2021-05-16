@@ -1,4 +1,4 @@
-use crate::io::OverlappedHeader;
+use crate::io::{OverlappedHeader, OverlappedState};
 use crate::ioctl;
 use crate::operation::Operation;
 use crate::ops::{self, OverlappedOperation};
@@ -34,16 +34,22 @@ impl OverlappedResult {
 }
 
 /// A wrapped handle able to perform overlapped operations.
-pub struct OverlappedHandle<H> {
+pub struct OverlappedHandle<H>
+where
+    H: AsRawHandle,
+{
     pub(crate) handle: H,
     pub(crate) port: crate::sys::CompletionPort,
     pub(crate) header: Arc<OverlappedHeader>,
 }
 
-unsafe impl<H> Send for OverlappedHandle<H> where H: Send {}
-unsafe impl<H> Sync for OverlappedHandle<H> where H: Sync {}
+unsafe impl<H> Send for OverlappedHandle<H> where H: AsRawHandle + Send {}
+unsafe impl<H> Sync for OverlappedHandle<H> where H: AsRawHandle + Sync {}
 
-impl<H> OverlappedHandle<H> {
+impl<H> OverlappedHandle<H>
+where
+    H: AsRawHandle,
+{
     /// Construct a zeroed overlapped structure with the given buffers available
     /// for performing operations over.
     pub(crate) fn new(handle: H, port: crate::sys::CompletionPort) -> Self {
@@ -183,6 +189,17 @@ where
         f.debug_struct("OverlappedHandle")
             .field("handle", &self.handle.as_raw_handle())
             .finish()
+    }
+}
+
+impl<H> Drop for OverlappedHandle<H>
+where
+    H: AsRawHandle,
+{
+    fn drop(&mut self) {
+        if let OverlappedState::Remote = self.header.state() {
+            self.cancel();
+        }
     }
 }
 

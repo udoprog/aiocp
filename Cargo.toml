@@ -12,7 +12,7 @@ background = []
 [dependencies]
 parking_lot = "0.11.1"
 futures = "0.3.15"
-tokio = "1.0"
+tokio = {version = "1.5", path = "../tokio/tokio"}
 tracing = {version = "0.1.26", optional = true}
 
 [dependencies.winapi]
@@ -28,5 +28,5 @@ features = [
 ]
 
 [dev-dependencies]
-tokio = {version = "1.0", features = ["full"]}
+tokio = {version = "1.5", features = ["full"], path = "../tokio/tokio"}
 tracing-subscriber = "0.2.18"
