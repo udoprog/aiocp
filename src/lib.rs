@@ -20,7 +20,7 @@ pub use self::ext::HandleExt;
 
 mod completion_port;
 pub use self::completion_port::{
-    CompletionOutcome, CompletionPoll, CompletionPort, CompletionStatus,
+    CompletionOutcome, CompletionPoll, CompletionPort, CompletionStatus, RegisterOptions,
 };
 
 mod io;

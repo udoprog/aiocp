@@ -6,7 +6,7 @@ use tokio::io::AsyncReadExt as _;
 
 #[tokio::main]
 async fn main() -> io::Result<()> {
-    iocp_examples::init_logging("iocp=trace");
+    iocp_examples::init_logging();
 
     let mut it = std::env::args_os();
     it.next();
@@ -21,7 +21,7 @@ async fn main() -> io::Result<()> {
 
     let output = ArcHandle::new(output);
 
-    let mut reader1 = port.register(output, 0)?;
+    let mut reader1 = port.register_handle(output, Default::default())?;
     let mut reader2 = reader1.duplicate();
 
     let mut buf1 = Vec::new();

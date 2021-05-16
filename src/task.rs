@@ -32,11 +32,11 @@ pub(crate) struct Header {
 }
 
 impl Header {
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new(max_buffer_size: usize) -> Self {
         Header {
             // Safety: OVERLAPPED structure is valid when zeroed.
             raw: unsafe { mem::MaybeUninit::zeroed().assume_init() },
-            pool: BufferPool::new(),
+            pool: BufferPool::new(max_buffer_size),
             lock: AtomicI64::new(0),
             waker: AtomicWaker::new(),
         }

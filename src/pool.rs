@@ -11,21 +11,31 @@ pub struct BufferPool {
     taken: Cell<usize>,
     // Buffers taken out of the pool.
     released: Cell<usize>,
+    // The maximum size permitted for a single I/O buffer.
+    max_buffer_size: usize,
 }
 
 impl BufferPool {
     /// Construct a new default I/O pool.
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new(max_buffer_size: usize) -> Self {
         Self {
             buffers: UnsafeCell::new(vec![vec![0u8; 64]]),
             taken: Cell::new(0),
             released: Cell::new(0),
+            max_buffer_size,
         }
+    }
+
+    /// Get the max buffer size.
+    pub(crate) fn max_buffer_size(&self) -> usize {
+        self.max_buffer_size
     }
 
     /// Take the next I/O buffer that is not busy. Ensures that the returned
     /// buffer can hold at least `size` bytes.
     pub fn take(&self, size: usize) -> ReadBuf<'_> {
+        let size = usize::min(size, self.max_buffer_size);
+
         // Safety: There is no way to access the underlying pool without having
         // an exclusive lock through [OverlappedGuard].
         //

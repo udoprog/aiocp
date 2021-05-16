@@ -5,7 +5,7 @@ use tokio::io::AsyncReadExt as _;
 
 #[tokio::main]
 async fn main() -> io::Result<()> {
-    iocp_examples::init_logging("iocp=trace");
+    iocp_examples::init_logging();
 
     let mut it = std::env::args_os();
     it.next();
@@ -18,7 +18,7 @@ async fn main() -> io::Result<()> {
         .custom_flags(iocp::flags::FILE_FLAG_OVERLAPPED)
         .open(path)?;
 
-    let mut io = port.register(output, 0)?;
+    let mut io = port.register_handle(output, Default::default())?;
     let mut buf = Vec::new();
     io.read_to_end(&mut buf).await?;
 

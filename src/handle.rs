@@ -58,11 +58,11 @@ where
 {
     /// Construct a zeroed overlapped structure with the given buffers available
     /// for performing operations over.
-    pub(crate) fn new(handle: H, port: crate::sys::CompletionPort) -> Self {
+    pub(crate) fn new(handle: H, port: crate::sys::CompletionPort, max_buffer_size: usize) -> Self {
         Self {
             handle,
             port,
-            header: Arc::new(Header::new()),
+            header: Arc::new(Header::new(max_buffer_size)),
         }
     }
 
@@ -97,7 +97,7 @@ where
     ///
     /// let output = ArcHandle::new(output);
     ///
-    /// let mut reader1 = port.register(output, 0)?;
+    /// let mut reader1 = port.register_handle(output, Default::default())?;
     /// let mut reader2 = reader1.duplicate();
     ///
     /// let mut buf1 = Vec::new();
@@ -114,10 +114,12 @@ where
     where
         H: Clone,
     {
+        let max_buffer_size = self.header.pool.max_buffer_size();
+
         Self {
             handle: self.handle.clone(),
             port: self.port.clone(),
-            header: Arc::new(Header::new()),
+            header: Arc::new(Header::new(max_buffer_size)),
         }
     }
 

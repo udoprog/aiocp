@@ -5,6 +5,35 @@ use std::fmt;
 use std::io;
 use std::sync::Arc;
 
+/// Default max buffer size in use.
+const DEFAULT_MAX_BUFFER_SIZE: usize = 1 << 16;
+
+/// Options to use when registering a handle or a socket.
+#[derive(Debug, Clone, Copy)]
+pub struct RegisterOptions {
+    key: usize,
+    max_buffer_size: usize,
+}
+
+impl RegisterOptions {
+    /// Return a modified register options with a different max buffer size.
+    pub fn with_max_buffer_size(self, max_buffer_size: usize) -> Self {
+        Self {
+            max_buffer_size,
+            ..self
+        }
+    }
+}
+
+impl Default for RegisterOptions {
+    fn default() -> Self {
+        Self {
+            key: 0,
+            max_buffer_size: DEFAULT_MAX_BUFFER_SIZE,
+        }
+    }
+}
+
 /// The asynchronous handler for a Windows I/O Completion Port.
 ///
 /// Permits the user to use it and wait for an overlapped result to complete.
@@ -53,11 +82,12 @@ impl CompletionPort {
     /// Register the given handle for overlapped I/O and allocate buffers with
     /// the specified capacities that can be used inside of an operation with
     /// it.
-    pub fn register<H>(&self, handle: H, key: usize) -> io::Result<Handle<H>>
+    pub fn register_handle<H>(&self, handle: H, options: RegisterOptions) -> io::Result<Handle<H>>
     where
         H: AsRawHandle,
     {
-        self.imp.register(handle, key)
+        self.imp
+            .register_handle(handle, options.key, options.max_buffer_size)
     }
 
     /// Shut down the current completion port. This will cause

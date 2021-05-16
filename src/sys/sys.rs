@@ -86,7 +86,16 @@ impl CompletionPort {
         ))
     }
 
-    pub(crate) fn register<H>(&self, handle: H, key: usize) -> io::Result<Handle<H>>
+    /// Associate a new handle with the I/O completion port.
+    ///
+    /// This means any overlapped operations associated with the given handle
+    /// will notify this completion port.
+    pub(crate) fn register_handle<H>(
+        &self,
+        handle: H,
+        key: usize,
+        max_buffer_size: usize,
+    ) -> io::Result<Handle<H>>
     where
         H: AsRawHandle,
     {
@@ -97,8 +106,21 @@ impl CompletionPort {
             ));
         }
 
-        self.register_handle(handle.as_raw_handle() as *mut _, key)?;
-        Ok(Handle::new(handle, self.clone()))
+        // Safety: there's nothing inherently unsafe about this.
+        unsafe {
+            let handle = ioapiset::CreateIoCompletionPort(
+                handle.as_raw_handle() as *mut _,
+                self.inner.handle,
+                key,
+                0,
+            );
+
+            if handle.is_null() {
+                return Err(io::Error::last_os_error());
+            }
+        }
+
+        Ok(Handle::new(handle, self.clone(), max_buffer_size))
     }
 
     /// Post a message to the I/O completion port.
@@ -179,20 +201,6 @@ impl CompletionPort {
 
     pub(crate) fn shutdown(&self) -> io::Result<()> {
         self.post(SHUTDOWN_PORT, ptr::null_mut())
-    }
-
-    /// Associate a new handle with the I/O completion port.
-    ///
-    /// This means any overlapped operations associated with the given handle
-    /// will notify this completion port.
-    fn register_handle(&self, handle: HANDLE, key: usize) -> io::Result<()> {
-        let handle = unsafe { ioapiset::CreateIoCompletionPort(handle, self.inner.handle, key, 0) };
-
-        if handle.is_null() {
-            return Err(io::Error::last_os_error());
-        }
-
-        Ok(())
     }
 
     fn get_queued_completion_status(&self) -> io::Result<CompletionStatus> {

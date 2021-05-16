@@ -5,7 +5,7 @@ use tokio::io::AsyncWriteExt as _;
 
 #[tokio::main]
 async fn main() -> io::Result<()> {
-    iocp_examples::init_logging("iocp=trace");
+    iocp_examples::init_logging();
 
     let (port, handle) = iocp::setup(1)?;
 
@@ -21,7 +21,7 @@ async fn main() -> io::Result<()> {
 
     let buf = b"Hello World\n\nBaz";
 
-    let mut io = port.register(output, 33)?;
+    let mut io = port.register_handle(output, Default::default())?;
     io.write_all(&buf[..]).await?;
 
     port.shutdown()?;

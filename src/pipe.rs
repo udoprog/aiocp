@@ -170,7 +170,7 @@ impl CreatePipeOptions {
     ///         .read(true)
     ///         .open(PIPE_NAME)?;
     ///
-    ///     let mut client = port.register(client, 0)?;
+    ///     let mut client = port.register_handle(client, Default::default())?;
     ///
     ///     let e = client.write(b"ping").await.unwrap_err();
     ///     assert_eq!(e.kind(), io::ErrorKind::PermissionDenied);
@@ -183,14 +183,14 @@ impl CreatePipeOptions {
     ///         .access_inbound(false)
     ///         .create(PIPE_NAME)?;
     ///
-    ///     let mut server = port.register(server, 0)?;
+    ///     let mut server = port.register_handle(server, Default::default())?;
     ///
     ///     let client = OpenOptions::new()
     ///         .custom_flags(iocp::flags::FILE_FLAG_OVERLAPPED)
     ///         .read(true)
     ///         .open(PIPE_NAME)?;
     ///
-    ///     let mut client = port.register(client, 0)?;
+    ///     let mut client = port.register_handle(client, Default::default())?;
     ///
     ///     let write = server.write_all(b"ping");
     ///
@@ -256,7 +256,7 @@ impl CreatePipeOptions {
     ///         .write(true)
     ///         .open(PIPE_NAME)?;
     ///
-    ///     let mut client = port.register(client, 0)?;
+    ///     let mut client = port.register_handle(client, Default::default())?;
     ///
     ///     let mut buf = [0u8; 4];
     ///     let e = client.read(&mut buf).await.unwrap_err();
@@ -270,14 +270,14 @@ impl CreatePipeOptions {
     ///         .access_outbound(false)
     ///         .create(PIPE_NAME)?;
     ///
-    ///     let mut server = port.register(server, 0)?;
+    ///     let mut server = port.register_handle(server, Default::default())?;
     ///
     ///     let client = OpenOptions::new()
     ///         .custom_flags(iocp::flags::FILE_FLAG_OVERLAPPED)
     ///         .write(true)
     ///         .open(PIPE_NAME)?;
     ///
-    ///     let mut client = port.register(client, 0)?;
+    ///     let mut client = port.register_handle(client, Default::default())?;
     ///
     ///     let write = client.write_all(b"ping");
     ///
