@@ -5,18 +5,7 @@ use tokio::io::AsyncReadExt as _;
 
 #[tokio::main]
 async fn main() -> io::Result<()> {
-    use tracing_subscriber::prelude::*;
-
-    tracing_subscriber::registry()
-        .with(tracing_subscriber::EnvFilter::new("trace"))
-        .with(
-            tracing_subscriber::fmt::layer()
-                .with_target(false)
-                .with_level(true)
-                .compact(),
-        )
-        .try_init()
-        .expect("error initializing logging");
+    aiocp_examples::init_logging("aiocp=trace");
 
     let mut it = std::env::args_os();
     it.next();

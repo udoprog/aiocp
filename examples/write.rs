@@ -5,6 +5,8 @@ use tokio::io::AsyncWriteExt as _;
 
 #[tokio::main]
 async fn main() -> io::Result<()> {
+    aiocp_examples::init_logging("aiocp=trace");
+
     let (port, handle) = aiocp::setup(2)?;
 
     let mut it = std::env::args_os();

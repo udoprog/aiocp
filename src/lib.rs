@@ -31,12 +31,12 @@ pub use self::arc_handle::ArcHandle;
 
 mod task;
 
-mod operation;
+mod operation_poller;
 
 mod handle;
 pub use self::handle::{Handle, OverlappedResult};
 
-pub mod ops;
+pub mod operation;
 
 mod pool;
 pub use self::pool::BufferPool;

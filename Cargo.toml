@@ -29,4 +29,7 @@ features = [
 
 [dev-dependencies]
 tokio = {version = "1.0", features = ["full"]}
-tracing-subscriber = "0.2.18"
+aiocp-examples = {path = "aiocp-examples"}
+
+[workspace]
+members = ["aiocp-examples"]

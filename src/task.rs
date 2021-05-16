@@ -1,6 +1,6 @@
 use crate::atomic_waker::AtomicWaker;
 use crate::io::{Overlapped, OverlappedState};
-use crate::ops;
+use crate::operation;
 use crate::pool::BufferPool;
 use std::cell::UnsafeCell;
 use std::fmt;
@@ -70,7 +70,10 @@ impl Header {
 
     /// Try to lock the overlap and return the pointer to the associated
     /// overlapped struct.
-    pub(crate) fn lock<'a>(self: &'a Arc<Self>, ops::Code(id): ops::Code) -> LockResult<'a> {
+    pub(crate) fn lock<'a>(
+        self: &'a Arc<Self>,
+        operation::Code(id): operation::Code,
+    ) -> LockResult<'a> {
         let id = id as i64 + 1; // to ensure that we never use 0
 
         let state = loop {

@@ -1,7 +1,7 @@
 use crate::io::OverlappedState;
 use crate::ioctl;
-use crate::operation::Operation;
-use crate::ops::{self, OverlappedOperation};
+use crate::operation::{self, Operation};
+use crate::operation_poller::OperationPoller;
 use crate::task::Header;
 use std::convert::TryFrom as _;
 use std::fmt;
@@ -22,11 +22,13 @@ use winapi::um::ioapiset;
 #[derive(Debug, Clone, Copy)]
 #[non_exhaustive]
 pub struct OverlappedResult {
+    /// The bytes transferred by this operation. Its exact meaning is determined
+    /// by [Operation::collect].
     pub bytes_transferred: usize,
 }
 
 impl OverlappedResult {
-    /// Construct an empty overlapped result.
+    /// An empty overlapped result.
     pub(crate) const fn empty() -> Self {
         Self {
             bytes_transferred: 0,
@@ -122,7 +124,7 @@ where
     pub async fn run<O>(&mut self, op: O) -> io::Result<O::Output>
     where
         H: AsRawHandle,
-        O: OverlappedOperation<H>,
+        O: Operation<H>,
     {
         Run::new(self, op).await
     }
@@ -149,7 +151,7 @@ where
     where
         B: AsRef<[u8]>,
     {
-        self.run(ops::Write::new(buf)).await
+        self.run(operation::Write::new(buf)).await
     }
 
     /// Write the given buffer and return the number of bytes written.
@@ -157,13 +159,13 @@ where
     where
         B: AsMut<[u8]>,
     {
-        self.run(ops::Read::new(buf)).await
+        self.run(operation::Read::new(buf)).await
     }
 
     /// Connect the current handle, under the assumption that it is the server
     /// side of a named pipe.
     pub async fn connect_named_pipe(&mut self) -> io::Result<()> {
-        self.run(ops::ConnectNamedPipe::new()).await
+        self.run(operation::ConnectNamedPipe::new()).await
     }
 
     /// Connect the current handle, under the assumption that it is the server
@@ -172,31 +174,16 @@ where
     where
         M: ioctl::Ioctl,
     {
-        self.run(ops::DeviceIoCtl::new(message)).await
-    }
-
-    /// Helper to deal with I/O pending errors correctly.
-    ///
-    /// Returns Some(e) if an immediate error should be returned.
-    pub(crate) fn handle_io_pending<O>(&self, result: io::Result<O>) -> io::Result<()> {
-        match result {
-            Ok(..) => (),
-            Err(e) if e.raw_os_error() == Some(crate::errors::ERROR_IO_PENDING) => (),
-            Err(e) => return Err(e),
-        }
-
-        Ok(())
+        self.run(operation::DeviceIoCtl::new(message)).await
     }
 
     /// Get the overlapped result from the current structure.
-    ///
-    /// # Safety
-    ///
-    /// This must only be called while under an exclusive [lock].
     pub(crate) fn result(&self) -> io::Result<OverlappedResult>
     where
         H: AsRawHandle,
     {
+        // Safety: All of there operations are safe and it is guaranteed that
+        // we have access to the underlying handles.
         unsafe {
             let mut bytes_transferred = mem::MaybeUninit::zeroed();
 
@@ -271,10 +258,10 @@ where
 enum State<'a, H, O>
 where
     H: AsRawHandle,
-    O: OverlappedOperation<H>,
+    O: Operation<H>,
 {
     /// The operation is in its initial state.
-    Running { op: Operation<'a, H, O> },
+    Running { op: OperationPoller<'a, H, O> },
     /// State of the task is completed.
     Complete,
 }
@@ -283,7 +270,7 @@ where
 pub(crate) struct Run<'a, H, O>
 where
     H: AsRawHandle,
-    O: OverlappedOperation<H>,
+    O: Operation<H>,
 {
     state: State<'a, H, O>,
 }
@@ -291,13 +278,13 @@ where
 impl<'a, H, O> Run<'a, H, O>
 where
     H: AsRawHandle,
-    O: OverlappedOperation<H>,
+    O: Operation<H>,
 {
     /// Construct a new future running the given operation.
     pub(crate) fn new(io: &'a mut Handle<H>, op: O) -> Self {
         Self {
             state: State::Running {
-                op: Operation::new(io, op),
+                op: OperationPoller::new(io, op),
             },
         }
     }
@@ -306,7 +293,7 @@ where
 impl<'a, H, O> Future for Run<'a, H, O>
 where
     H: AsRawHandle,
-    O: OverlappedOperation<H>,
+    O: Operation<H>,
 {
     type Output = io::Result<O::Output>;
 
@@ -329,4 +316,17 @@ where
             ))),
         }
     }
+}
+
+/// Helper to deal with I/O pending errors correctly.
+///
+/// Returns Some(e) if an immediate error should be returned.
+pub(crate) fn handle_io_pending<O>(result: io::Result<O>) -> io::Result<()> {
+    match result {
+        Ok(..) => (),
+        Err(e) if e.raw_os_error() == Some(crate::errors::ERROR_IO_PENDING) => (),
+        Err(e) => return Err(e),
+    }
+
+    Ok(())
 }

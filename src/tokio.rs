@@ -1,7 +1,7 @@
 use crate::ext::HandleExt as _;
 use crate::handle::Handle;
 use crate::io::OverlappedState;
-use crate::ops;
+use crate::operation;
 use crate::task::LockResult;
 use std::io;
 use std::os::windows::io::AsRawHandle;
@@ -21,7 +21,7 @@ where
         let permit = self.port.permit()?;
         self.register_by_ref(cx.waker());
 
-        let guard = match self.header.lock(ops::READ) {
+        let guard = match self.header.lock(operation::READ) {
             LockResult::Ok(guard) => guard,
             LockResult::Busy(mismatch) => {
                 if mismatch {
@@ -40,7 +40,7 @@ where
                 let mut b = pool.take(buf.remaining());
                 let mut overlapped = guard.overlapped();
                 let result = self.handle.read_overlapped(&mut b, &mut overlapped);
-                self.handle_io_pending(result)?;
+                crate::handle::handle_io_pending(result)?;
                 std::mem::forget((permit, guard, overlapped));
                 Poll::Pending
             }
@@ -66,7 +66,7 @@ where
         let permit = self.port.permit()?;
         self.register_by_ref(cx.waker());
 
-        let guard = match self.header.lock(ops::WRITE) {
+        let guard = match self.header.lock(operation::WRITE) {
             LockResult::Ok(guard) => guard,
             LockResult::Busy(mismatch) => {
                 if mismatch {
@@ -86,7 +86,7 @@ where
                 b.put_slice(buf);
                 let mut overlapped = guard.overlapped();
                 let result = self.handle.write_overlapped(b.filled(), &mut overlapped);
-                self.handle_io_pending(result)?;
+                crate::handle::handle_io_pending(result)?;
                 std::mem::forget((permit, guard, overlapped));
                 Poll::Pending
             }
