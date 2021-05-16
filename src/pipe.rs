@@ -1,4 +1,4 @@
-use crate::handle::Handle;
+use crate::sys::{AsRawHandle, RawHandle};
 use std::ffi::OsStr;
 use std::io;
 use std::os::windows::ffi::OsStrExt as _;
@@ -7,8 +7,34 @@ use winapi::shared::minwindef::DWORD;
 use winapi::um::handleapi;
 use winapi::um::namedpipeapi;
 use winapi::um::winbase;
+use winapi::um::winnt::HANDLE;
 
-/// The pipe mode of a [Handle].
+/// A named pipe as created through [CreateNamedPipe].
+#[derive(Debug)]
+pub struct NamedPipe {
+    handle: HANDLE,
+}
+
+// Safety: handles to named pipes are thread safe.
+unsafe impl Send for NamedPipe {}
+unsafe impl Sync for NamedPipe {}
+
+impl Drop for NamedPipe {
+    fn drop(&mut self) {
+        unsafe {
+            // NB: intentionally ignored.
+            let _ = handleapi::CloseHandle(self.handle);
+        }
+    }
+}
+
+impl AsRawHandle for NamedPipe {
+    fn as_raw_handle(&self) -> RawHandle {
+        self.handle as *mut _
+    }
+}
+
+/// The pipe mode of a [NamedPipe].
 ///
 /// Set through [CreatePipeOptions::pipe_mode].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -21,7 +47,7 @@ pub enum PipeMode {
     Byte,
     /// Data is written to the pipe as a stream of messages. The pipe treats the
     /// bytes written during each write operation as a message unit. Any reading
-    /// function on [Handle] returns [ERROR_MORE_DATA] when a message is not
+    /// function on [NamedPipe] returns [ERROR_MORE_DATA] when a message is not
     /// read completely.
     ///
     /// Corresponds to [PIPE_TYPE_MESSAGE][winapi::um::winbase::PIPE_TYPE_MESSAGE].
@@ -145,7 +171,6 @@ impl CreatePipeOptions {
     ///         .open(PIPE_NAME)?;
     ///
     ///     let mut client = port.register(client, 0)?;
-    ///     let mut client = aiocp::tokio::io(&mut client);
     ///
     ///     let e = client.write(b"ping").await.unwrap_err();
     ///     assert_eq!(e.kind(), io::ErrorKind::PermissionDenied);
@@ -159,7 +184,6 @@ impl CreatePipeOptions {
     ///         .create(PIPE_NAME)?;
     ///
     ///     let mut server = port.register(server, 0)?;
-    ///     let mut server = aiocp::tokio::io(&mut server);
     ///
     ///     let client = OpenOptions::new()
     ///         .custom_flags(aiocp::flags::FILE_FLAG_OVERLAPPED)
@@ -167,7 +191,6 @@ impl CreatePipeOptions {
     ///         .open(PIPE_NAME)?;
     ///
     ///     let mut client = port.register(client, 0)?;
-    ///     let mut client = aiocp::tokio::io(&mut client);
     ///
     ///     let write = server.write_all(b"ping");
     ///
@@ -234,7 +257,6 @@ impl CreatePipeOptions {
     ///         .open(PIPE_NAME)?;
     ///
     ///     let mut client = port.register(client, 0)?;
-    ///     let mut client = aiocp::tokio::io(&mut client);
     ///
     ///     let mut buf = [0u8; 4];
     ///     let e = client.read(&mut buf).await.unwrap_err();
@@ -249,7 +271,6 @@ impl CreatePipeOptions {
     ///         .create(PIPE_NAME)?;
     ///
     ///     let mut server = port.register(server, 0)?;
-    ///     let mut server = aiocp::tokio::io(&mut server);
     ///
     ///     let client = OpenOptions::new()
     ///         .custom_flags(aiocp::flags::FILE_FLAG_OVERLAPPED)
@@ -257,7 +278,6 @@ impl CreatePipeOptions {
     ///         .open(PIPE_NAME)?;
     ///
     ///     let mut client = port.register(client, 0)?;
-    ///     let mut client = aiocp::tokio::io(&mut client);
     ///
     ///     let write = client.write_all(b"ping");
     ///
@@ -406,7 +426,7 @@ impl CreatePipeOptions {
     ///     .create(PIPE_NAME)?;
     /// # Ok(()) }
     /// ```
-    pub fn create(&self, addr: impl AsRef<OsStr>) -> io::Result<Handle> {
+    pub fn create(&self, addr: impl AsRef<OsStr>) -> io::Result<NamedPipe> {
         // Safety: We're calling create_with_security_attributes w/ a null
         // pointer which disables it.
         unsafe { self.create_with_security_attributes(addr, ptr::null_mut()) }
@@ -444,7 +464,7 @@ impl CreatePipeOptions {
         &self,
         addr: impl AsRef<OsStr>,
         attrs: *mut (),
-    ) -> io::Result<Handle> {
+    ) -> io::Result<NamedPipe> {
         let addr = encode_addr(addr);
 
         let handle = namedpipeapi::CreateNamedPipeW(
@@ -462,7 +482,7 @@ impl CreatePipeOptions {
             return Err(io::Error::last_os_error());
         }
 
-        Ok(Handle::from_raw(handle))
+        Ok(NamedPipe { handle })
     }
 }
 

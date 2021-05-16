@@ -1,11 +1,10 @@
 use crate::completion_port::{CompletionOutcome, CompletionPoll, CompletionStatus, Shutdown};
 use crate::handle::Handle;
-use crate::io::OverlappedHeader;
-use crate::overlapped_handle::OverlappedHandle;
+use crate::task::Header;
 use std::fmt;
 use std::io;
 use std::mem;
-pub use std::os::windows::io::AsRawHandle;
+pub use std::os::windows::io::{AsRawHandle, RawHandle};
 use std::ptr;
 use std::sync::atomic::{AtomicIsize, Ordering};
 use std::sync::Arc;
@@ -25,12 +24,21 @@ const RESERVED_PORTS: usize = !0b1111;
 /// The shared interior of the completion port.
 struct Inner {
     /// The number of pending I/O operations, where it's expected how many
-    /// [OverlappedHandle]'s have submitted an operation to be pending.
+    /// [Handle]'s have submitted an operation to be pending.
     ///
     /// Is negative if the port is shutting down.
     pending: AtomicIsize,
     /// The inner handle.
-    handle: Handle,
+    handle: HANDLE,
+}
+
+impl Drop for Inner {
+    fn drop(&mut self) {
+        unsafe {
+            // NB: intentionally ignored.
+            let _ = handleapi::CloseHandle(self.handle);
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -55,7 +63,7 @@ impl CompletionPort {
             Ok(Self {
                 inner: Arc::new(Inner {
                     pending: AtomicIsize::new(0),
-                    handle: Handle::from_raw(handle),
+                    handle,
                 }),
             })
         }
@@ -78,7 +86,7 @@ impl CompletionPort {
         ))
     }
 
-    pub(crate) fn register<H>(&self, handle: H, key: usize) -> io::Result<OverlappedHandle<H>>
+    pub(crate) fn register<H>(&self, handle: H, key: usize) -> io::Result<Handle<H>>
     where
         H: AsRawHandle,
     {
@@ -90,14 +98,14 @@ impl CompletionPort {
         }
 
         self.register_handle(handle.as_raw_handle() as *mut _, key)?;
-        Ok(OverlappedHandle::new(handle, self.clone()))
+        Ok(Handle::new(handle, self.clone()))
     }
 
     /// Post a message to the I/O completion port.
     pub(crate) fn post(&self, completion_port: usize, overlapped: *mut ()) -> io::Result<()> {
         unsafe {
             let result = ioapiset::PostQueuedCompletionStatus(
-                self.inner.handle.as_raw_handle() as *mut _,
+                self.inner.handle,
                 0,
                 completion_port,
                 overlapped as *mut _,
@@ -178,14 +186,7 @@ impl CompletionPort {
     /// This means any overlapped operations associated with the given handle
     /// will notify this completion port.
     fn register_handle(&self, handle: HANDLE, key: usize) -> io::Result<()> {
-        let handle = unsafe {
-            ioapiset::CreateIoCompletionPort(
-                handle,
-                self.inner.handle.as_raw_handle() as *mut _,
-                key,
-                0,
-            )
-        };
+        let handle = unsafe { ioapiset::CreateIoCompletionPort(handle, self.inner.handle, key, 0) };
 
         if handle.is_null() {
             return Err(io::Error::last_os_error());
@@ -202,7 +203,7 @@ impl CompletionPort {
             let mut overlapped = mem::MaybeUninit::zeroed();
 
             let result = ioapiset::GetQueuedCompletionStatus(
-                self.inner.handle.as_raw_handle() as *mut _,
+                self.inner.handle,
                 bytes_transferred.as_mut_ptr(),
                 completion_key.as_mut_ptr(),
                 overlapped.as_mut_ptr(),
@@ -225,7 +226,7 @@ impl CompletionPort {
             let overlapped = overlapped.assume_init();
 
             let header = if !overlapped.is_null() {
-                Some(OverlappedHeader::from_overlapped(overlapped))
+                Some(Header::from_overlapped(overlapped))
             } else {
                 None
             };

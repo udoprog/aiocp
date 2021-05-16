@@ -1,60 +1,35 @@
 use crate::ext::HandleExt as _;
+use crate::handle::Handle;
 use crate::io::OverlappedState;
 use crate::ops;
-use crate::overlapped_handle::OverlappedHandle;
+use crate::task::LockResult;
 use std::io;
 use std::os::windows::io::AsRawHandle;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 
-/// Wrap a [OverlappedHandle] into a Tokio-compatible type that implements
-/// [AsyncRead][tokio::io::AsyncRead] and [AsyncWrite][tokio::io::AsyncWrite].
-pub fn io<H>(handle: &mut OverlappedHandle<H>) -> Io<'_, H>
+impl<H> Handle<H>
 where
     H: AsRawHandle,
 {
-    Io::new(handle)
-}
-
-/// A tokio wrapper around the given overlapped handle that enables support for
-/// [AsyncRead] and [AsyncWrite].
-pub struct Io<'a, H>
-where
-    H: AsRawHandle,
-{
-    io: &'a mut OverlappedHandle<H>,
-}
-
-impl<'a, H> Io<'a, H>
-where
-    H: AsRawHandle,
-{
-    fn new(io: &'a mut OverlappedHandle<H>) -> Self {
-        Self { io }
-    }
-
-    /// Get a reference to the underlying overlapped handle.
-    pub fn as_ref(&self) -> &OverlappedHandle<H> {
-        self.io
-    }
-
-    /// Get a mutable reference to the underlying overlapped handle.
-    pub fn as_mut(&mut self) -> &mut OverlappedHandle<H> {
-        self.io
-    }
-
     fn poll_read(&mut self, cx: &mut Context<'_>, buf: &mut ReadBuf<'_>) -> Poll<io::Result<()>>
     where
         H: AsRawHandle,
     {
         trace!(op = "read", "poll");
-        let permit = self.io.port.permit()?;
-        self.io.register_by_ref(cx.waker());
+        let permit = self.port.permit()?;
+        self.register_by_ref(cx.waker());
 
-        let guard = match self.io.header.lock(ops::TOKIO_IO) {
-            Some(guard) => guard,
-            None => return Poll::Pending,
+        let guard = match self.header.lock(ops::READ) {
+            LockResult::Ok(guard) => guard,
+            LockResult::Busy(mismatch) => {
+                if mismatch {
+                    self.cancel_immediate();
+                }
+
+                return Poll::Pending;
+            }
         };
 
         trace!(op = "read", state = ?guard.state(), "unlocked");
@@ -64,17 +39,17 @@ where
                 let pool = guard.clear_and_get_pool();
                 let mut b = pool.take(buf.remaining());
                 let mut overlapped = guard.overlapped();
-                let result = self.io.handle.read_overlapped(&mut b, &mut overlapped);
-                self.io.handle_io_pending(result)?;
+                let result = self.handle.read_overlapped(&mut b, &mut overlapped);
+                self.handle_io_pending(result)?;
                 std::mem::forget((permit, guard, overlapped));
                 Poll::Pending
             }
             OverlappedState::Remote => {
                 let pool = guard.pool();
-                let result = self.io.result()?;
+                let result = self.result()?;
                 // Safety: this point is synchronized to ensure that no
                 // remote buffers are used.
-                let b = unsafe { pool.release(result.bytes_transferred) };
+                let b = pool.release(result.bytes_transferred);
                 let filled = b.filled();
                 buf.put_slice(filled);
                 guard.advance(filled.len());
@@ -88,12 +63,18 @@ where
         H: AsRawHandle,
     {
         trace!(op = "write", "poll");
-        let permit = self.io.port.permit()?;
-        self.io.register_by_ref(cx.waker());
+        let permit = self.port.permit()?;
+        self.register_by_ref(cx.waker());
 
-        let guard = match self.io.header.lock(ops::TOKIO_IO) {
-            Some(guard) => guard,
-            None => return Poll::Pending,
+        let guard = match self.header.lock(ops::WRITE) {
+            LockResult::Ok(guard) => guard,
+            LockResult::Busy(mismatch) => {
+                if mismatch {
+                    self.cancel_immediate();
+                }
+
+                return Poll::Pending;
+            }
         };
 
         trace!(op = "write", state = ?guard.state(), "unlocked");
@@ -104,13 +85,13 @@ where
                 let mut b = pool.take(buf.len());
                 b.put_slice(buf);
                 let mut overlapped = guard.overlapped();
-                let result = self.io.handle.write_overlapped(b.filled(), &mut overlapped);
-                self.io.handle_io_pending(result)?;
+                let result = self.handle.write_overlapped(b.filled(), &mut overlapped);
+                self.handle_io_pending(result)?;
                 std::mem::forget((permit, guard, overlapped));
                 Poll::Pending
             }
             OverlappedState::Remote => {
-                let result = self.io.result()?;
+                let result = self.result()?;
                 guard.advance(result.bytes_transferred);
                 Poll::Ready(Ok(result.bytes_transferred))
             }
@@ -118,7 +99,7 @@ where
     }
 }
 
-impl<H> AsyncRead for Io<'_, H>
+impl<H> AsyncRead for Handle<H>
 where
     H: AsRawHandle,
 {
@@ -132,7 +113,7 @@ where
     }
 }
 
-impl<H> AsyncWrite for Io<'_, H>
+impl<H> AsyncWrite for Handle<H>
 where
     H: AsRawHandle,
 {
@@ -151,16 +132,5 @@ where
 
     fn poll_shutdown(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
         Poll::Ready(Ok(()))
-    }
-}
-
-impl<H> Drop for Io<'_, H>
-where
-    H: AsRawHandle,
-{
-    fn drop(&mut self) {
-        if let OverlappedState::Remote = self.io.header.state() {
-            self.io.cancel();
-        }
     }
 }

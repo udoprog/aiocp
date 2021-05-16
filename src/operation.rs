@@ -1,19 +1,20 @@
+use crate::handle::Handle;
 use crate::io::OverlappedState;
 use crate::ops::OverlappedOperation;
-use crate::overlapped_handle::OverlappedHandle;
+use crate::task::LockResult;
 use std::io;
 use std::os::windows::io::AsRawHandle;
 use std::task::{Context, Poll};
 
-/// Operation helper for turning an [OverlappedOperation] and a [OverlappedHandle]
+/// Operation helper for turning an [OverlappedOperation] and a [Handle]
 /// into a pollable operation suitable for use in futures.
 #[derive(Debug)]
-pub struct Operation<'a, H, O>
+pub(crate) struct Operation<'a, H, O>
 where
     O: OverlappedOperation<H>,
     H: AsRawHandle,
 {
-    io: &'a mut OverlappedHandle<H>,
+    io: &'a mut Handle<H>,
     op: O,
 }
 
@@ -23,12 +24,12 @@ where
     H: AsRawHandle,
 {
     /// Construct a new operation wrapper.
-    pub fn new(io: &'a mut OverlappedHandle<H>, op: O) -> Self {
+    pub(crate) fn new(io: &'a mut Handle<H>, op: O) -> Self {
         Self { io, op }
     }
 
     /// Poll the current operation for completion.
-    pub fn poll(&mut self, cx: &mut Context<'_>) -> Poll<io::Result<O::Output>>
+    pub(crate) fn poll(&mut self, cx: &mut Context<'_>) -> Poll<io::Result<O::Output>>
     where
         H: AsRawHandle,
     {
@@ -36,8 +37,14 @@ where
         self.io.register_by_ref(cx.waker());
 
         let guard = match self.io.header.lock(O::CODE) {
-            Some(guard) => guard,
-            None => return Poll::Pending,
+            LockResult::Ok(guard) => guard,
+            LockResult::Busy(mismatch) => {
+                if mismatch {
+                    self.io.cancel_immediate();
+                }
+
+                return Poll::Pending;
+            }
         };
 
         match guard.state() {
@@ -66,7 +73,7 @@ where
 {
     fn drop(&mut self) {
         if let OverlappedState::Remote = self.io.header.state() {
-            self.io.cancel();
+            self.io.cancel_if_pending();
         }
     }
 }

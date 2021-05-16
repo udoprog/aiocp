@@ -1,6 +1,6 @@
-use crate::io::OverlappedHeader;
-use crate::overlapped_handle::OverlappedHandle;
+use crate::handle::Handle;
 use crate::sys::AsRawHandle;
+use crate::task::Header;
 use std::fmt;
 use std::io;
 use std::sync::Arc;
@@ -53,7 +53,7 @@ impl CompletionPort {
     /// Register the given handle for overlapped I/O and allocate buffers with
     /// the specified capacities that can be used inside of an operation with
     /// it.
-    pub fn register<H>(&self, handle: H, key: usize) -> io::Result<OverlappedHandle<H>>
+    pub fn register<H>(&self, handle: H, key: usize) -> io::Result<Handle<H>>
     where
         H: AsRawHandle,
     {
@@ -101,7 +101,7 @@ pub enum CompletionOutcome {
 #[non_exhaustive]
 pub struct CompletionStatus {
     /// The header associated with the I/O operation.
-    pub(crate) header: Option<Arc<OverlappedHeader>>,
+    pub(crate) header: Option<Arc<Header>>,
     /// The completion key woken up.
     pub completion_key: usize,
     /// The number of bytes transferred.

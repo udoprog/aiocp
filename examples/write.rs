@@ -20,7 +20,7 @@ async fn main() -> io::Result<()> {
     let buf = b"Hello World\n\nBaz";
 
     let mut io = port.register(output, 33)?;
-    aiocp::tokio::io(&mut io).write_all(&buf[..]).await?;
+    io.write_all(&buf[..]).await?;
 
     port.shutdown()?;
     handle.join()?;

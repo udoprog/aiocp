@@ -26,8 +26,11 @@ impl BufferPool {
     /// Take the next I/O buffer that is not busy. Ensures that the returned
     /// buffer can hold at least `size` bytes.
     pub fn take(&self, size: usize) -> ReadBuf<'_> {
-        // Safety: we're ensuring that the buffer is being locally marked as
-        // busy through `taken` just below which prevents further aliasing use.
+        // Safety: There is no way to access the underlying pool without having
+        // an exclusive lock through [OverlappedGuard].
+        //
+        // We're also checked overlapped access through the local taken /
+        // released pair, so that access is never overlapping.
         unsafe {
             let buffers = &mut *self.buffers.get();
 
@@ -56,39 +59,42 @@ impl BufferPool {
     /// buffer, under the assumption that it has also been filled with the
     /// provided length.
     ///
-    /// # Safety
-    ///
-    /// Caller must ensure that the taken buffer is initialized to the given
-    /// length and that the buffer is not currently in used.
-    ///
-    /// The caller must also ensure that the released buffer has been filled up
-    /// to `len`.
-    pub unsafe fn release(&self, len: usize) -> ReadBuf<'_> {
-        let buffers = &mut *self.buffers.get();
+    /// Buffers are reclaimed in FIFO order. The first call to
+    /// [take][BufferPool::take] correponds to the first call of
+    /// [release][BufferPool::release].
+    pub fn release(&self, len: usize) -> ReadBuf<'_> {
+        // Safety: There is no way to access the underlying pool without having
+        // an exclusive lock through [OverlappedGuard].
+        //
+        // We're also checked overlapped access through the local taken /
+        // released pair, so that access is never overlapping.
+        unsafe {
+            let buffers = &mut *self.buffers.get();
 
-        let released = self.released.get();
-        self.released.set(released + 1);
+            let released = self.released.get();
+            self.released.set(released + 1);
 
-        assert! {
-            released < self.taken.get(),
-            "released buffers are oob; released = {}, taken = {}",
-            released,
-            self.taken.get(),
-        };
+            assert! {
+                released < self.taken.get(),
+                "released buffers are oob; released = {}, taken = {}",
+                released,
+                self.taken.get(),
+            };
 
-        let buf = &mut buffers[released];
+            let buf = &mut buffers[released];
 
-        assert! {
-            len <= buf.capacity(),
-            "buffer length out of bounds for capacity of buffer; len = {}, cap = {}",
-            len,
-            buf.capacity(),
-        };
+            assert! {
+                len <= buf.capacity(),
+                "buffer length out of bounds for capacity of buffer; len = {}, cap = {}",
+                len,
+                buf.capacity(),
+            };
 
-        let buf = slice::from_raw_parts_mut(buf.as_mut_ptr(), len);
-        let mut buf = ReadBuf::new(buf);
-        buf.set_filled(len);
-        buf
+            let buf = slice::from_raw_parts_mut(buf.as_mut_ptr(), len);
+            let mut buf = ReadBuf::new(buf);
+            buf.set_filled(len);
+            buf
+        }
     }
 
     /// Indicates that there's no pending operations and that this can be safely

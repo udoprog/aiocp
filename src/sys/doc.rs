@@ -1,5 +1,5 @@
 use crate::completion_port::{CompletionPoll, CompletionStatus};
-use crate::overlapped_handle::OverlappedHandle;
+use crate::overlapped_handle::Handle;
 use std::io;
 use std::marker;
 
@@ -23,7 +23,7 @@ impl CompletionPort {
         unreachable!()
     }
 
-    pub(crate) fn register<H>(&self, handle: H, key: usize) -> io::Result<OverlappedHandle<H>>
+    pub(crate) fn register<H>(&self, handle: H, key: usize) -> io::Result<Handle<H>>
     where
         H: AsRawHandle,
     {

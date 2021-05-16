@@ -34,13 +34,13 @@ async fn main() -> io::Result<()> {
     let mut client = port.register(client, 0)?;
 
     let server = tokio::spawn(async move {
-        aiocp::tokio::io(&mut server).write_all(b"ping").await?;
+        server.write_all(b"ping").await?;
         Ok::<_, io::Error>(())
     });
 
     let client = tokio::spawn(async move {
         let mut buf = [0u8; 4];
-        aiocp::tokio::io(&mut client).read_exact(&mut buf).await?;
+        client.read_exact(&mut buf).await?;
         Ok::<_, io::Error>(buf)
     });
 

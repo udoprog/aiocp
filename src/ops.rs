@@ -1,8 +1,9 @@
 use crate::ext::HandleExt as _;
-use crate::io::{Overlapped, OverlappedGuard};
+use crate::handle::OverlappedResult;
+use crate::io::Overlapped;
 use crate::ioctl;
-use crate::overlapped_handle::OverlappedResult;
 use crate::pool::BufferPool;
+use crate::task::LockGuard;
 use std::io;
 use std::os::windows::io::AsRawHandle;
 
@@ -10,7 +11,6 @@ pub const READ: Code = Code(0x7f_ff_ff_01);
 pub const WRITE: Code = Code(0x7f_ff_ff_02);
 pub const IO_CTL: Code = Code(0x7f_ff_ff_03);
 pub const CONNECT_NAMED_PIPE: Code = Code(0x7f_ff_ff_04);
-pub const TOKIO_IO: Code = Code(0x7f_ff_ff_10);
 
 /// A unique code that designates exactly how any one given overlapped result
 /// must be treated. This has safety implications, because treating the
@@ -28,7 +28,7 @@ pub enum OverlappedOutcome {
 }
 
 impl OverlappedOutcome {
-    pub(crate) fn apply_to(self, guard: &OverlappedGuard<'_>) {
+    pub(crate) fn apply_to(self, guard: &LockGuard<'_>) {
         match self {
             Self::None => (),
             Self::Advance(n) => {
@@ -149,7 +149,7 @@ where
         result: OverlappedResult,
         pool: &BufferPool,
     ) -> io::Result<(Self::Output, OverlappedOutcome)> {
-        let b = unsafe { pool.release(result.bytes_transferred) };
+        let b = pool.release(result.bytes_transferred);
         let filled = b.filled();
         self.buf.as_mut()[..filled.len()].copy_from_slice(filled);
         let outcome = OverlappedOutcome::Advance(filled.len());

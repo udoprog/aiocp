@@ -5,11 +5,24 @@ use tokio::io::AsyncReadExt as _;
 
 #[tokio::main]
 async fn main() -> io::Result<()> {
-    let (port, handle) = aiocp::setup(2)?;
+    use tracing_subscriber::prelude::*;
+
+    tracing_subscriber::registry()
+        .with(tracing_subscriber::EnvFilter::new("trace"))
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_target(false)
+                .with_level(true)
+                .compact(),
+        )
+        .try_init()
+        .expect("error initializing logging");
 
     let mut it = std::env::args_os();
     it.next();
     let path = it.next().expect("missing <path> argument");
+
+    let (port, handle) = aiocp::setup(2)?;
 
     let output = OpenOptions::new()
         .read(true)
@@ -18,7 +31,7 @@ async fn main() -> io::Result<()> {
 
     let mut io = port.register(output, 0)?;
     let mut buf = Vec::new();
-    aiocp::tokio::io(&mut io).read_to_end(&mut buf).await?;
+    io.read_to_end(&mut buf).await?;
 
     dbg!(buf.len());
 

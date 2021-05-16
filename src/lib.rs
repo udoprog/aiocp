@@ -24,21 +24,22 @@ pub use self::completion_port::{
 };
 
 mod io;
-pub use self::io::Overlapped;
+pub use self::io::{Overlapped, OverlappedState};
+
+mod arc_handle;
+pub use self::arc_handle::ArcHandle;
+
+mod task;
 
 mod operation;
-pub use self::operation::Operation;
 
-mod overlapped_handle;
-pub use self::overlapped_handle::{OverlappedHandle, OverlappedResult};
+mod handle;
+pub use self::handle::{Handle, OverlappedResult};
 
 pub mod ops;
 
 mod pool;
 pub use self::pool::BufferPool;
-
-mod handle;
-pub use self::handle::Handle;
 
 pub mod pipe;
 
