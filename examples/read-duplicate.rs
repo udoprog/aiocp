@@ -1,4 +1,4 @@
-use aiocp::ArcHandle;
+use iocp::ArcHandle;
 use std::fs::OpenOptions;
 use std::io;
 use std::os::windows::fs::OpenOptionsExt as _;
@@ -6,17 +6,17 @@ use tokio::io::AsyncReadExt as _;
 
 #[tokio::main]
 async fn main() -> io::Result<()> {
-    aiocp_examples::init_logging("aiocp=trace");
+    iocp_examples::init_logging("iocp=trace");
 
     let mut it = std::env::args_os();
     it.next();
     let path = it.next().expect("missing <path> argument");
 
-    let (port, handle) = aiocp::setup(2)?;
+    let (port, handle) = iocp::setup(1)?;
 
     let output = OpenOptions::new()
         .read(true)
-        .custom_flags(aiocp::flags::FILE_FLAG_OVERLAPPED)
+        .custom_flags(iocp::flags::FILE_FLAG_OVERLAPPED)
         .open(path)?;
 
     let output = ArcHandle::new(output);

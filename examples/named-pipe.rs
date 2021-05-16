@@ -5,16 +5,16 @@ use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 
 #[tokio::main]
 async fn main() -> io::Result<()> {
-    aiocp_examples::init_logging("aiocp=trace");
+    iocp_examples::init_logging("iocp=trace");
 
-    let (port, handle) = aiocp::setup(2)?;
+    let (port, handle) = iocp::setup(1)?;
 
-    let server = aiocp::pipe::CreatePipeOptions::new()
-        .custom_flags(aiocp::flags::FILE_FLAG_OVERLAPPED)
+    let server = iocp::pipe::CreatePipeOptions::new()
+        .custom_flags(iocp::flags::FILE_FLAG_OVERLAPPED)
         .create(r"\\.\pipe\test")?;
 
     let client = OpenOptions::new()
-        .custom_flags(aiocp::flags::FILE_FLAG_OVERLAPPED)
+        .custom_flags(iocp::flags::FILE_FLAG_OVERLAPPED)
         .read(true)
         .write(true)
         .open(r"\\.\pipe\test")?;

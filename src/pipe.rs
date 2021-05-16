@@ -89,9 +89,9 @@ impl CreatePipeOptions {
     /// Creates a new named pipe builder with the default settings.
     ///
     /// ```
-    /// use aiocp::pipe::CreatePipeOptions;
+    /// use iocp::pipe::CreatePipeOptions;
     ///
-    /// const PIPE_NAME: &str = r"\\.\pipe\aiocp-new";
+    /// const PIPE_NAME: &str = r"\\.\pipe\iocp-new";
     ///
     /// # #[tokio::main] async fn main() -> std::io::Result<()> {
     /// let server = CreatePipeOptions::new().create(PIPE_NAME)?;
@@ -135,27 +135,27 @@ impl CreatePipeOptions {
     /// # Examples
     ///
     /// ```
-    /// use aiocp::pipe::CreatePipeOptions;
+    /// use iocp::pipe::CreatePipeOptions;
     /// use std::fs::OpenOptions;
     /// use std::io;
     /// use std::os::windows::fs::OpenOptionsExt as _;
     /// use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
     ///
-    /// const PIPE_NAME: &str = r"\\.\pipe\aiocp-access-inbound";
+    /// const PIPE_NAME: &str = r"\\.\pipe\iocp-access-inbound";
     ///
     /// # #[tokio::main] async fn main() -> io::Result<()> {
-    /// let (port, handle) = aiocp::setup(2)?;
+    /// let (port, handle) = iocp::setup(1)?;
     ///
     /// // Server side prevents connecting by denying inbound access, client errors
     /// // when attempting to open the connection.
     /// {
     ///     let _server = CreatePipeOptions::new()
-    ///         .custom_flags(aiocp::flags::FILE_FLAG_OVERLAPPED)
+    ///         .custom_flags(iocp::flags::FILE_FLAG_OVERLAPPED)
     ///         .access_inbound(false)
     ///         .create(PIPE_NAME)?;
     ///
     ///     let e = OpenOptions::new()
-    ///         .custom_flags(aiocp::flags::FILE_FLAG_OVERLAPPED)
+    ///         .custom_flags(iocp::flags::FILE_FLAG_OVERLAPPED)
     ///         .read(true)
     ///         .write(true)
     ///         .open(PIPE_NAME)
@@ -166,7 +166,7 @@ impl CreatePipeOptions {
     ///     // Disabling writing allows a client to connect, but leads to runtime
     ///     // error if a write is attempted.
     ///     let client = OpenOptions::new()
-    ///         .custom_flags(aiocp::flags::FILE_FLAG_OVERLAPPED)
+    ///         .custom_flags(iocp::flags::FILE_FLAG_OVERLAPPED)
     ///         .read(true)
     ///         .open(PIPE_NAME)?;
     ///
@@ -179,14 +179,14 @@ impl CreatePipeOptions {
     /// // A functional, unidirectional server-to-client only communication.
     /// {
     ///     let server = CreatePipeOptions::new()
-    ///         .custom_flags(aiocp::flags::FILE_FLAG_OVERLAPPED)
+    ///         .custom_flags(iocp::flags::FILE_FLAG_OVERLAPPED)
     ///         .access_inbound(false)
     ///         .create(PIPE_NAME)?;
     ///
     ///     let mut server = port.register(server, 0)?;
     ///
     ///     let client = OpenOptions::new()
-    ///         .custom_flags(aiocp::flags::FILE_FLAG_OVERLAPPED)
+    ///         .custom_flags(iocp::flags::FILE_FLAG_OVERLAPPED)
     ///         .read(true)
     ///         .open(PIPE_NAME)?;
     ///
@@ -221,27 +221,27 @@ impl CreatePipeOptions {
     /// # Examples
     ///
     /// ```
-    /// use aiocp::pipe::CreatePipeOptions;
+    /// use iocp::pipe::CreatePipeOptions;
     /// use std::fs::OpenOptions;
     /// use std::io;
     /// use std::os::windows::fs::OpenOptionsExt as _;
     /// use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
     ///
-    /// const PIPE_NAME: &str = r"\\.\pipe\aiocp-access-outbound";
+    /// const PIPE_NAME: &str = r"\\.\pipe\iocp-access-outbound";
     ///
     /// # #[tokio::main] async fn main() -> io::Result<()> {
-    /// let (port, handle) = aiocp::setup(2)?;
+    /// let (port, handle) = iocp::setup(1)?;
     ///
     /// // Server side prevents connecting by denying outbound access, client errors
     /// // when attempting to open the connection.
     /// {
     ///     let _server = CreatePipeOptions::new()
-    ///         .custom_flags(aiocp::flags::FILE_FLAG_OVERLAPPED)
+    ///         .custom_flags(iocp::flags::FILE_FLAG_OVERLAPPED)
     ///         .access_outbound(false)
     ///         .create(PIPE_NAME)?;
     ///
     ///     let e = OpenOptions::new()
-    ///         .custom_flags(aiocp::flags::FILE_FLAG_OVERLAPPED)
+    ///         .custom_flags(iocp::flags::FILE_FLAG_OVERLAPPED)
     ///         .read(true)
     ///         .write(true)
     ///         .open(PIPE_NAME)
@@ -252,7 +252,7 @@ impl CreatePipeOptions {
     ///     // Disabling reading allows a client to connect, but leads to runtime
     ///     // error if a read is attempted.
     ///     let mut client = OpenOptions::new()
-    ///         .custom_flags(aiocp::flags::FILE_FLAG_OVERLAPPED)
+    ///         .custom_flags(iocp::flags::FILE_FLAG_OVERLAPPED)
     ///         .write(true)
     ///         .open(PIPE_NAME)?;
     ///
@@ -266,14 +266,14 @@ impl CreatePipeOptions {
     /// // A functional, unidirectional client-to-server only communication.
     /// {
     ///     let server = CreatePipeOptions::new()
-    ///         .custom_flags(aiocp::flags::FILE_FLAG_OVERLAPPED)
+    ///         .custom_flags(iocp::flags::FILE_FLAG_OVERLAPPED)
     ///         .access_outbound(false)
     ///         .create(PIPE_NAME)?;
     ///
     ///     let mut server = port.register(server, 0)?;
     ///
     ///     let client = OpenOptions::new()
-    ///         .custom_flags(aiocp::flags::FILE_FLAG_OVERLAPPED)
+    ///         .custom_flags(iocp::flags::FILE_FLAG_OVERLAPPED)
     ///         .write(true)
     ///         .open(PIPE_NAME)?;
     ///
@@ -312,13 +312,13 @@ impl CreatePipeOptions {
     ///
     /// ```
     /// use std::io;
-    /// use aiocp::pipe::CreatePipeOptions;
+    /// use iocp::pipe::CreatePipeOptions;
     ///
-    /// const PIPE_NAME: &str = r"\\.\pipe\aiocp-first-instance";
+    /// const PIPE_NAME: &str = r"\\.\pipe\iocp-first-instance";
     ///
     /// # #[tokio::main] async fn main() -> io::Result<()> {
     /// let mut builder = CreatePipeOptions::new();
-    /// builder.custom_flags(aiocp::flags::FILE_FLAG_OVERLAPPED);
+    /// builder.custom_flags(iocp::flags::FILE_FLAG_OVERLAPPED);
     /// builder.first_pipe_instance(true);
     ///
     /// let server = builder.create(PIPE_NAME)?;
@@ -366,7 +366,7 @@ impl CreatePipeOptions {
     /// you do not wish to set an instance limit, leave it unspecified.
     ///
     /// ```should_panic
-    /// use aiocp::pipe::CreatePipeOptions;
+    /// use iocp::pipe::CreatePipeOptions;
     ///
     /// # #[tokio::main] async fn main() -> std::io::Result<()> {
     /// let builder = CreatePipeOptions::new().max_instances(255);
@@ -416,13 +416,13 @@ impl CreatePipeOptions {
     /// # Examples
     ///
     /// ```
-    /// use aiocp::pipe::CreatePipeOptions;
+    /// use iocp::pipe::CreatePipeOptions;
     ///
-    /// const PIPE_NAME: &str = r"\\.\pipe\aiocp-open";
+    /// const PIPE_NAME: &str = r"\\.\pipe\iocp-open";
     ///
     /// # #[tokio::main] async fn main() -> std::io::Result<()> {
     /// let server = CreatePipeOptions::new()
-    ///     .custom_flags(aiocp::flags::FILE_FLAG_OVERLAPPED)
+    ///     .custom_flags(iocp::flags::FILE_FLAG_OVERLAPPED)
     ///     .create(PIPE_NAME)?;
     /// # Ok(()) }
     /// ```

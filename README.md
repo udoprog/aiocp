@@ -1,4 +1,4 @@
-# aiocp
+# iocp
 
 Experimental asynchronous I/O Completion Port driver for Windows.
 
@@ -18,11 +18,11 @@ use std::os::windows::fs::OpenOptionsExt as _;
 
 #[tokio::main]
 async fn main() -> io::Result<()> {
-    let (port, background) = aiocp::setup(2)?;
+    let (port, background) = iocp::setup(1)?;
 
     let output = OpenOptions::new()
         .read(true)
-        .custom_flags(aiocp::flags::FILE_FLAG_OVERLAPPED)
+        .custom_flags(iocp::flags::FILE_FLAG_OVERLAPPED)
         .open("read.txt")?;
 
     let mut io = port.register(output, 33)?;

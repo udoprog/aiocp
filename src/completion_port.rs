@@ -68,7 +68,7 @@ impl CompletionPort {
     ///
     /// ```
     /// # fn main() -> std::io::Result<()> {
-    /// let (port, handle) = aiocp::setup(2)?;
+    /// let (port, handle) = iocp::setup(1)?;
     /// port.shutdown()?;
     /// handle.join()?;
     /// # Ok(()) }
@@ -116,7 +116,7 @@ impl CompletionStatus {
     /// # Examples
     ///
     /// ```no_run
-    /// use aiocp::{CompletionPort, CompletionPoll};
+    /// use iocp::{CompletionPort, CompletionPoll};
     ///
     /// # #[tokio::main] async fn main() -> std::io::Result<()> {
     /// let port = CompletionPort::create(2)?;
@@ -148,7 +148,7 @@ impl CompletionStatus {
     /// # Examples
     ///
     /// ```no_run
-    /// use aiocp::{CompletionPort, CompletionPoll};
+    /// use iocp::{CompletionPort, CompletionPoll};
     ///
     /// # #[tokio::main] async fn main() -> std::io::Result<()> {
     /// let port = CompletionPort::create(2)?;

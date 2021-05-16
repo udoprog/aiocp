@@ -80,7 +80,7 @@ where
     /// # Examples
     ///
     /// ```no_run
-    /// use aiocp::ArcHandle;
+    /// use iocp::ArcHandle;
     /// use std::fs::OpenOptions;
     /// use std::io;
     /// use std::os::windows::fs::OpenOptionsExt as _;
@@ -88,11 +88,11 @@ where
     /// use tokio::io::AsyncReadExt as _;
     ///
     /// # #[tokio::main] async fn main() -> std::io::Result<()> {
-    /// let (port, handle) = aiocp::setup(2)?;
+    /// let (port, handle) = iocp::setup(1)?;
     ///
     /// let output = OpenOptions::new()
     ///     .read(true)
-    ///     .custom_flags(aiocp::flags::FILE_FLAG_OVERLAPPED)
+    ///     .custom_flags(iocp::flags::FILE_FLAG_OVERLAPPED)
     ///     .open("file.txt")?;
     ///
     /// let output = ArcHandle::new(output);

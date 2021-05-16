@@ -5,9 +5,9 @@ use tokio::io::AsyncWriteExt as _;
 
 #[tokio::main]
 async fn main() -> io::Result<()> {
-    aiocp_examples::init_logging("aiocp=trace");
+    iocp_examples::init_logging("iocp=trace");
 
-    let (port, handle) = aiocp::setup(2)?;
+    let (port, handle) = iocp::setup(1)?;
 
     let mut it = std::env::args_os();
     it.next();
@@ -16,7 +16,7 @@ async fn main() -> io::Result<()> {
     let output = OpenOptions::new()
         .write(true)
         .create_new(true)
-        .custom_flags(aiocp::flags::FILE_FLAG_OVERLAPPED)
+        .custom_flags(iocp::flags::FILE_FLAG_OVERLAPPED)
         .open(path)?;
 
     let buf = b"Hello World\n\nBaz";
