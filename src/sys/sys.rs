@@ -14,7 +14,6 @@ use winapi::shared::winerror;
 use winapi::um::errhandlingapi;
 use winapi::um::handleapi;
 use winapi::um::ioapiset;
-use winapi::um::minwinbase;
 use winapi::um::winbase;
 use winapi::um::winnt::HANDLE;
 
@@ -115,22 +114,14 @@ impl CompletionPort {
     pub(crate) fn poll(&self) -> io::Result<CompletionPoll> {
         trace!("poll");
 
-        let (bytes_transferred, completion_key, overlapped, outcome) =
-            self.get_queued_completion_status()?;
+        let status = self.get_queued_completion_status()?;
 
-        if completion_key >= RESERVED_PORTS {
-            match completion_key {
+        if status.completion_key >= RESERVED_PORTS {
+            match status.completion_key {
                 SHUTDOWN_PORT => {
                     let pending = self.inner.pending.fetch_add(isize::MIN, Ordering::SeqCst);
-
-                    trace! {
-                        completion_key = completion_key,
-                        overlapped = ?overlapped,
-                        outcome = ?outcome,
-                        pending = pending,
-                        "shutdown",
-                    };
-
+                    trace!(status = ?status, pending = pending, "shutdown");
+                    debug_assert!(pending >= 0);
                     let pending = pending as usize;
                     return Ok(CompletionPoll::Shutdown(Shutdown { pending }));
                 }
@@ -144,41 +135,25 @@ impl CompletionPort {
         }
 
         let _pending = self.inner.pending.fetch_sub(1, Ordering::AcqRel);
+        trace!(status = ?status, pending = _pending, "completion");
 
-        trace! {
-            completion_key = completion_key,
-            overlapped = ?overlapped,
-            outcome = ?outcome,
-            pending = _pending,
-            "completion",
-        };
-
-        // Safety: this is handled internally of this crate.
-        let header = unsafe { OverlappedHeader::from_overlapped(overlapped) };
-
-        Ok(CompletionPoll::Status(CompletionStatus {
-            header,
-            completion_key,
-            bytes_transferred,
-            outcome,
-        }))
+        Ok(CompletionPoll::Status(status))
     }
 
     pub(crate) fn poll_during_shutdown(&self) -> io::Result<CompletionStatus> {
         loop {
             trace!("poll_during_shutdown");
 
-            let (bytes_transferred, completion_key, overlapped, outcome) =
-                self.get_queued_completion_status()?;
+            let status = self.get_queued_completion_status()?;
 
             trace! {
                 state = "wakeup",
-                overlapped = ?overlapped,
+                status = ?status,
                 "poll_during_shutdown",
             };
 
-            if completion_key >= RESERVED_PORTS {
-                match completion_key {
+            if status.completion_key >= RESERVED_PORTS {
+                match status.completion_key {
                     // shutdown called again.
                     SHUTDOWN_PORT => continue,
                     _ => {
@@ -190,15 +165,7 @@ impl CompletionPort {
                 }
             }
 
-            // Safety: this is handled internally of this crate.
-            let header = unsafe { OverlappedHeader::from_overlapped(overlapped) };
-
-            return Ok(CompletionStatus {
-                header,
-                completion_key,
-                bytes_transferred,
-                outcome,
-            });
+            return Ok(status);
         }
     }
 
@@ -227,9 +194,8 @@ impl CompletionPort {
         Ok(())
     }
 
-    fn get_queued_completion_status(
-        &self,
-    ) -> io::Result<(u32, usize, *mut minwinbase::OVERLAPPED, CompletionOutcome)> {
+    fn get_queued_completion_status(&self) -> io::Result<CompletionStatus> {
+        // Safety: this is handled internally of this crate.
         unsafe {
             let mut bytes_transferred = mem::MaybeUninit::zeroed();
             let mut completion_key = mem::MaybeUninit::zeroed();
@@ -258,7 +224,18 @@ impl CompletionPort {
             let completion_key = completion_key.assume_init();
             let overlapped = overlapped.assume_init();
 
-            Ok((bytes_transferred, completion_key, overlapped, outcome))
+            let header = if !overlapped.is_null() {
+                Some(OverlappedHeader::from_overlapped(overlapped))
+            } else {
+                None
+            };
+
+            Ok(CompletionStatus {
+                header,
+                completion_key,
+                bytes_transferred,
+                outcome,
+            })
         }
     }
 }

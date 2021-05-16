@@ -1,10 +1,10 @@
 use crate::atomic_waker::AtomicWaker;
 use crate::ops;
 use crate::pool::BufferPool;
-use std::cell::UnsafeCell;
 use std::mem;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
+use std::{cell::UnsafeCell, fmt};
 use winapi::um::minwinbase;
 
 /// The internal state of the driver. This can be fully determined by the driver
@@ -160,6 +160,14 @@ impl OverlappedHeader {
     #[inline]
     fn wake(&self) {
         self.waker.wake();
+    }
+}
+
+impl fmt::Debug for OverlappedHeader {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("OverlappedHeader")
+            .field("overlapped", &self.raw.get())
+            .finish()
     }
 }
 

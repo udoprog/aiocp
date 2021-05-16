@@ -97,10 +97,11 @@ pub enum CompletionOutcome {
 }
 
 /// The status of a single completion.
+#[derive(Debug)]
 #[non_exhaustive]
 pub struct CompletionStatus {
     /// The header associated with the I/O operation.
-    pub(crate) header: Arc<OverlappedHeader>,
+    pub(crate) header: Option<Arc<OverlappedHeader>>,
     /// The completion key woken up.
     pub completion_key: usize,
     /// The number of bytes transferred.
@@ -137,7 +138,9 @@ impl CompletionStatus {
     /// # Ok(()) }
     /// ```
     pub fn unlock(&self) {
-        self.header.unlock();
+        if let Some(header) = &self.header {
+            header.unlock();
+        }
     }
 
     /// Release the task associated with this completion status.
@@ -167,7 +170,9 @@ impl CompletionStatus {
     /// # Ok(()) }
     /// ```
     pub fn release(&self) {
-        self.header.release()
+        if let Some(header) = &self.header {
+            header.release()
+        }
     }
 }
 
