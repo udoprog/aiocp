@@ -13,6 +13,8 @@ use std::sync::Arc;
 use std::task::Waker;
 use std::task::{Context, Poll};
 use winapi::shared::minwindef::FALSE;
+use winapi::shared::winerror;
+use winapi::um::errhandlingapi;
 use winapi::um::ioapiset;
 
 /// The results of an overlapped operation.
@@ -20,6 +22,15 @@ use winapi::um::ioapiset;
 #[non_exhaustive]
 pub struct OverlappedResult {
     pub bytes_transferred: usize,
+}
+
+impl OverlappedResult {
+    /// Construct an empty overlapped result.
+    pub(crate) const fn empty() -> Self {
+        Self {
+            bytes_transferred: 0,
+        }
+    }
 }
 
 /// A wrapped handle able to perform overlapped operations.
@@ -41,6 +52,19 @@ impl<H> OverlappedHandle<H> {
             port,
             header: Arc::new(OverlappedHeader::new()),
         }
+    }
+
+    /// Helper to deal with I/O pending errors correctly.
+    ///
+    /// Returns Some(e) if an immediate error should be returned.
+    pub(crate) fn handle_io_pending<O>(&self, result: io::Result<O>) -> io::Result<()> {
+        match result {
+            Ok(..) => (),
+            Err(e) if e.raw_os_error() == Some(crate::errors::ERROR_IO_PENDING) => (),
+            Err(e) => return Err(e),
+        }
+
+        Ok(())
     }
 
     /// Run the given I/O operation while managing it's overlapped
@@ -86,7 +110,11 @@ impl<H> OverlappedHandle<H> {
             );
 
             if result == FALSE {
-                return Err(io::Error::last_os_error());
+                return match errhandlingapi::GetLastError() {
+                    winerror::ERROR_HANDLE_EOF => Ok(OverlappedResult::empty()),
+                    winerror::ERROR_BROKEN_PIPE => Ok(OverlappedResult::empty()),
+                    other => Err(io::Error::from_raw_os_error(other as i32)),
+                };
             }
 
             let bytes_transferred = usize::try_from(bytes_transferred.assume_init())
@@ -163,6 +191,7 @@ where
 enum State<'a, H, O>
 where
     H: AsRawHandle,
+    O: OverlappedOperation<H>,
 {
     /// The operation is in its initial state.
     Running { op: Operation<'a, H, O> },
@@ -174,6 +203,7 @@ where
 pub struct Run<'a, H, O>
 where
     H: AsRawHandle,
+    O: OverlappedOperation<H>,
 {
     state: State<'a, H, O>,
 }

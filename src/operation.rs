@@ -1,49 +1,36 @@
+use crate::io::OverlappedState;
 use crate::ops::OverlappedOperation;
 use crate::overlapped_handle::OverlappedHandle;
 use std::io;
 use std::os::windows::io::AsRawHandle;
 use std::task::{Context, Poll};
 
-/// The internal state of the driver.
-#[derive(Debug)]
-pub(crate) enum State {
-    /// The driver currently owns the operation. The critical section associated
-    /// with the operation is owned by the driver.
-    Local,
-    /// The remote completion port owns the state of the handle.
-    Remote,
-}
-
 /// Operation helper for turning an [OverlappedOperation] and a [OverlappedHandle]
 /// into a pollable operation suitable for use in futures.
 #[derive(Debug)]
 pub struct Operation<'a, H, O>
 where
+    O: OverlappedOperation<H>,
     H: AsRawHandle,
 {
     io: &'a mut OverlappedHandle<H>,
     op: O,
-    state: State,
 }
 
 impl<'a, H, O> Operation<'a, H, O>
 where
+    O: OverlappedOperation<H>,
     H: AsRawHandle,
 {
     /// Construct a new operation wrapper.
     pub fn new(io: &'a mut OverlappedHandle<H>, op: O) -> Self {
-        Self {
-            io,
-            op,
-            state: State::Local,
-        }
+        Self { io, op }
     }
 
     /// Poll the current operation for completion.
     pub fn poll(&mut self, cx: &mut Context<'_>) -> Poll<io::Result<O::Output>>
     where
         H: AsRawHandle,
-        O: OverlappedOperation<H>,
     {
         let permit = self.io.port.permit()?;
         self.io.register_by_ref(cx.waker());
@@ -53,20 +40,20 @@ where
             None => return Poll::Pending,
         };
 
-        match self.state {
-            State::Local => {
+        match guard.state() {
+            OverlappedState::Local => {
                 let pool = guard.clear_and_get_pool();
                 let mut overlapped = guard.overlapped();
                 let result = self.op.prepare(&mut self.io.handle, &mut overlapped, pool);
-                crate::io::handle_io_pending(result)?;
+                self.io.handle_io_pending(result)?;
                 std::mem::forget((permit, guard, overlapped));
-                self.state = State::Remote;
                 Poll::Pending
             }
-            State::Remote => {
-                self.state = State::Local;
+            OverlappedState::Remote => {
                 let result = self.io.result()?;
-                Poll::Ready(self.op.collect(result, guard.pool()))
+                let (output, outcome) = self.op.collect(result, guard.pool())?;
+                outcome.apply_to(&guard);
+                Poll::Ready(Ok(output))
             }
         }
     }
@@ -74,10 +61,11 @@ where
 
 impl<H, O> Drop for Operation<'_, H, O>
 where
+    O: OverlappedOperation<H>,
     H: AsRawHandle,
 {
     fn drop(&mut self) {
-        if let State::Remote = self.state {
+        if let OverlappedState::Remote = self.io.header.state() {
             self.io.cancel();
         }
     }

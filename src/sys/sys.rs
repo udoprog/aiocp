@@ -243,10 +243,12 @@ impl CompletionPort {
                 winbase::INFINITE,
             );
 
+            trace!(result = result, "get_queued_completion_status");
+
             let outcome = if result == FALSE {
                 match errhandlingapi::GetLastError() {
                     winerror::ERROR_OPERATION_ABORTED => CompletionOutcome::Aborted,
-                    other => return Err(io::Error::from_raw_os_error(other as i32)),
+                    _ => CompletionOutcome::Errored,
                 }
             } else {
                 CompletionOutcome::Completed

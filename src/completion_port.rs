@@ -92,6 +92,8 @@ pub enum CompletionOutcome {
     Completed,
     /// The operation was aborted.
     Aborted,
+    /// The task errored.
+    Errored,
 }
 
 /// The status of a single completion.

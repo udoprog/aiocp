@@ -46,7 +46,7 @@ impl BufferPool {
 
             let buf =
                 slice::from_raw_parts_mut(buf.as_mut_ptr() as *mut MaybeUninit<u8>, buf.capacity());
-            let buf = ReadBuf::uninit(buf);
+            let buf = ReadBuf::uninit(&mut buf[..size]);
             buf
         }
     }

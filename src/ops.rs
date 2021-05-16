@@ -1,5 +1,5 @@
 use crate::ext::HandleExt as _;
-use crate::io::Overlapped;
+use crate::io::{Overlapped, OverlappedGuard};
 use crate::ioctl;
 use crate::overlapped_handle::OverlappedResult;
 use crate::pool::BufferPool;
@@ -10,6 +10,7 @@ pub const READ: Code = Code(0x7f_ff_ff_01);
 pub const WRITE: Code = Code(0x7f_ff_ff_02);
 pub const IO_CTL: Code = Code(0x7f_ff_ff_03);
 pub const CONNECT_NAMED_PIPE: Code = Code(0x7f_ff_ff_04);
+pub const TOKIO_IO: Code = Code(0x7f_ff_ff_10);
 
 /// A unique code that designates exactly how any one given overlapped result
 /// must be treated. This has safety implications, because treating the
@@ -17,6 +18,25 @@ pub const CONNECT_NAMED_PIPE: Code = Code(0x7f_ff_ff_04);
 /// in assuming that uninitialized memory has been initialized by the write
 /// operation.
 pub struct Code(pub(crate) u32);
+
+/// The outcome of an overlapped operation.
+pub enum OverlappedOutcome {
+    /// Do not modify the state of the overlapped header.
+    None,
+    /// Advance the read/write cursor by the given amount.
+    Advance(usize),
+}
+
+impl OverlappedOutcome {
+    pub(crate) fn apply_to(self, guard: &OverlappedGuard<'_>) {
+        match self {
+            Self::None => (),
+            Self::Advance(n) => {
+                guard.advance(n);
+            }
+        }
+    }
+}
 
 /// The model for a single I/O operation.
 ///
@@ -42,7 +62,11 @@ pub unsafe trait OverlappedOperation<H> {
     ) -> io::Result<()>;
 
     /// Collect the overlapped result into the output of the I/O operation.
-    fn collect(&mut self, result: OverlappedResult, pool: &BufferPool) -> io::Result<Self::Output>;
+    fn collect(
+        &mut self,
+        result: OverlappedResult,
+        pool: &BufferPool,
+    ) -> io::Result<(Self::Output, OverlappedOutcome)>;
 }
 
 /// A write operation wrapping a buffer.
@@ -75,12 +99,16 @@ where
         let buf = self.buf.as_ref();
         let mut b = pool.take(buf.len());
         b.put_slice(buf);
-        handle.write_overlapped(&mut b, overlapped)?;
+        handle.write_overlapped(b.filled(), overlapped)?;
         Ok(())
     }
 
-    fn collect(&mut self, result: OverlappedResult, _: &BufferPool) -> io::Result<Self::Output> {
-        Ok(result.bytes_transferred)
+    fn collect(
+        &mut self,
+        result: OverlappedResult,
+        _: &BufferPool,
+    ) -> io::Result<(Self::Output, OverlappedOutcome)> {
+        Ok((result.bytes_transferred, OverlappedOutcome::None))
     }
 }
 
@@ -116,11 +144,16 @@ where
         Ok(())
     }
 
-    fn collect(&mut self, result: OverlappedResult, pool: &BufferPool) -> io::Result<Self::Output> {
+    fn collect(
+        &mut self,
+        result: OverlappedResult,
+        pool: &BufferPool,
+    ) -> io::Result<(Self::Output, OverlappedOutcome)> {
         let b = unsafe { pool.release(result.bytes_transferred) };
         let filled = b.filled();
         self.buf.as_mut()[..filled.len()].copy_from_slice(filled);
-        Ok(filled.len())
+        let outcome = OverlappedOutcome::Advance(filled.len());
+        Ok((filled.len(), outcome))
     }
 }
 
@@ -151,8 +184,12 @@ where
         handle.connect_overlapped(overlapped)
     }
 
-    fn collect(&mut self, _: OverlappedResult, _: &BufferPool) -> io::Result<Self::Output> {
-        Ok(())
+    fn collect(
+        &mut self,
+        _: OverlappedResult,
+        _: &BufferPool,
+    ) -> io::Result<(Self::Output, OverlappedOutcome)> {
+        Ok(((), OverlappedOutcome::None))
     }
 }
 
@@ -187,11 +224,15 @@ where
         let mut buf = pool.take(len);
         // serialize request.
         buf.put_slice(unsafe { slice::from_raw_parts(&self.0 as *const _ as *const u8, len) });
-        handle.device_io_control_overlapped(M::CONTROL, Some(&mut buf), None, overlapped)?;
+        handle.device_io_control_overlapped(M::CONTROL, Some(buf.filled()), None, overlapped)?;
         Ok(())
     }
 
-    fn collect(&mut self, result: OverlappedResult, _: &BufferPool) -> io::Result<Self::Output> {
-        Ok(result.bytes_transferred)
+    fn collect(
+        &mut self,
+        result: OverlappedResult,
+        _: &BufferPool,
+    ) -> io::Result<(Self::Output, OverlappedOutcome)> {
+        Ok((result.bytes_transferred, OverlappedOutcome::None))
     }
 }

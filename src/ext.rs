@@ -20,11 +20,7 @@ pub trait HandleExt {
     ) -> io::Result<()>;
 
     /// Perform an overlapped write over the current I/O object.
-    fn write_overlapped(
-        &mut self,
-        buf: &ReadBuf<'_>,
-        overlapped: &mut Overlapped,
-    ) -> io::Result<usize>;
+    fn write_overlapped(&mut self, buf: &[u8], overlapped: &mut Overlapped) -> io::Result<usize>;
 
     /// Perform an overlapped connect over the current I/O object under the
     /// assumption that it is a named pipe.
@@ -34,7 +30,7 @@ pub trait HandleExt {
     fn device_io_control_overlapped(
         &mut self,
         io_control_code: u32,
-        in_buffer: Option<&ReadBuf<'_>>,
+        in_buffer: Option<&[u8]>,
         out_buffer: Option<&mut ReadBuf<'_>>,
         overlapped: &mut Overlapped,
     ) -> io::Result<usize>;
@@ -82,13 +78,8 @@ where
         }
     }
 
-    fn write_overlapped(
-        &mut self,
-        buf: &ReadBuf<'_>,
-        overlapped: &mut Overlapped,
-    ) -> io::Result<usize> {
+    fn write_overlapped(&mut self, buf: &[u8], overlapped: &mut Overlapped) -> io::Result<usize> {
         unsafe {
-            let buf = buf.filled();
             let len = DWORD::try_from(buf.len()).unwrap_or(DWORD::MAX);
             let mut n = mem::MaybeUninit::zeroed();
 
@@ -124,7 +115,7 @@ where
     fn device_io_control_overlapped(
         &mut self,
         io_control_code: u32,
-        in_buffer: Option<&ReadBuf<'_>>,
+        in_buffer: Option<&[u8]>,
         out_buffer: Option<&mut ReadBuf<'_>>,
         overlapped: &mut Overlapped,
     ) -> io::Result<usize> {
@@ -133,7 +124,6 @@ where
 
             let (in_buffer, in_buffer_len) = match in_buffer {
                 Some(buf) => {
-                    let buf = buf.filled();
                     let len = DWORD::try_from(buf.len()).expect("input buffer oob");
                     (buf.as_ptr() as *const _ as *mut _, len)
                 }

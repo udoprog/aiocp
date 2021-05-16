@@ -1,5 +1,5 @@
 use crate::ext::HandleExt as _;
-use crate::operation::State;
+use crate::io::OverlappedState;
 use crate::ops;
 use crate::overlapped_handle::OverlappedHandle;
 use std::io;
@@ -23,7 +23,6 @@ pub struct Io<'a, H>
 where
     H: AsRawHandle,
 {
-    state: State,
     io: &'a mut OverlappedHandle<H>,
 }
 
@@ -32,10 +31,7 @@ where
     H: AsRawHandle,
 {
     fn new(io: &'a mut OverlappedHandle<H>) -> Self {
-        Self {
-            state: State::Local,
-            io,
-        }
+        Self { io }
     }
 
     /// Get a reference to the underlying overlapped handle.
@@ -56,30 +52,32 @@ where
         let permit = self.io.port.permit()?;
         self.io.register_by_ref(cx.waker());
 
-        let guard = match self.io.header.lock(ops::READ) {
+        let guard = match self.io.header.lock(ops::TOKIO_IO) {
             Some(guard) => guard,
             None => return Poll::Pending,
         };
 
-        match self.state {
-            State::Local => {
+        trace!(op = "read", state = ?guard.state(), "unlocked");
+
+        match guard.state() {
+            OverlappedState::Local => {
                 let pool = guard.clear_and_get_pool();
                 let mut b = pool.take(buf.remaining());
                 let mut overlapped = guard.overlapped();
                 let result = self.io.handle.read_overlapped(&mut b, &mut overlapped);
-                crate::io::handle_io_pending(result)?;
+                self.io.handle_io_pending(result)?;
                 std::mem::forget((permit, guard, overlapped));
-                self.state = State::Remote;
                 Poll::Pending
             }
-            State::Remote => {
-                self.state = State::Local;
+            OverlappedState::Remote => {
                 let pool = guard.pool();
                 let result = self.io.result()?;
                 // Safety: this point is synchronized to ensure that no
                 // remote buffers are used.
                 let b = unsafe { pool.release(result.bytes_transferred) };
-                buf.put_slice(b.filled());
+                let filled = b.filled();
+                buf.put_slice(filled);
+                guard.advance(filled.len());
                 Poll::Ready(Ok(()))
             }
         }
@@ -93,26 +91,27 @@ where
         let permit = self.io.port.permit()?;
         self.io.register_by_ref(cx.waker());
 
-        let guard = match self.io.header.lock(ops::WRITE) {
+        let guard = match self.io.header.lock(ops::TOKIO_IO) {
             Some(guard) => guard,
             None => return Poll::Pending,
         };
 
-        match self.state {
-            State::Local => {
+        trace!(op = "write", state = ?guard.state(), "unlocked");
+
+        match guard.state() {
+            OverlappedState::Local => {
                 let pool = guard.clear_and_get_pool();
                 let mut b = pool.take(buf.len());
                 b.put_slice(buf);
                 let mut overlapped = guard.overlapped();
-                let result = self.io.handle.write_overlapped(&b, &mut overlapped);
-                crate::io::handle_io_pending(result)?;
+                let result = self.io.handle.write_overlapped(b.filled(), &mut overlapped);
+                self.io.handle_io_pending(result)?;
                 std::mem::forget((permit, guard, overlapped));
-                self.state = State::Remote;
                 Poll::Pending
             }
-            State::Remote => {
-                self.state = State::Local;
+            OverlappedState::Remote => {
                 let result = self.io.result()?;
+                guard.advance(result.bytes_transferred);
                 Poll::Ready(Ok(result.bytes_transferred))
             }
         }
@@ -160,7 +159,7 @@ where
     H: AsRawHandle,
 {
     fn drop(&mut self) {
-        if let State::Remote = self.state {
+        if let OverlappedState::Remote = self.io.header.state() {
             self.io.cancel();
         }
     }
