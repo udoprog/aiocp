@@ -14,6 +14,19 @@ use winapi::um::minwinbase;
 pub(crate) struct Header {
     raw: UnsafeCell<minwinbase::OVERLAPPED>,
     pool: BufferPool,
+    /// Lock for the current overlapped operation.
+    ///
+    /// This can have one of three states:
+    ///
+    /// * `0`   -   Which is the open state.
+    /// * `n > 0` - Which indicates that an overlapped task with a corresponding
+    ///             [Code] has been submitted and is being processed.
+    /// * `n < 0` - Which indicates that an overlapped task with a [Code]
+    ///             corresponding to `-n` has completed.
+    ///
+    /// The task of the [lock] function is to find the lock in the open state -
+    /// or try and work a lock which is in the negative state atomically into
+    /// the open state.
     lock: AtomicI64,
     waker: AtomicWaker,
 }
@@ -64,12 +77,11 @@ impl Header {
         if self.lock.load(Ordering::SeqCst) <= 0 {
             OverlappedState::Local
         } else {
-            OverlappedState::Remote
+            OverlappedState::Complete
         }
     }
 
-    /// Try to lock the overlap and return the pointer to the associated
-    /// overlapped struct.
+    /// Try to lock the overlap and return the a guard to the locked state.
     pub(crate) fn lock<'a>(
         self: &'a Arc<Self>,
         operation::Code(id): operation::Code,
@@ -91,14 +103,25 @@ impl Header {
                 return LockResult::Busy(id != -n);
             }
 
-            // Attempt to unlock using our locking code.
-            let op = self
-                .lock
-                .compare_exchange_weak(n, 0, Ordering::SeqCst, Ordering::Relaxed);
+            // Since we're only racing with a background task and not with
+            // others, release the lock into an open state and analyze if the
+            // header transitioned from the right code or not.
+            self.lock.store(0, Ordering::SeqCst);
 
-            if op.is_ok() {
-                break OverlappedState::Remote;
-            }
+            // Here we test if we acquire a lock with the right code or not.
+            // If we didn't, we discard the result of the previous operation
+            // and treat this as we've just unlocked a new operation.
+            //
+            // That would be akin to switching in the middle of driving one
+            // operation from e.g. a read to a write operation.
+            //
+            // If we were to just complete the operation, we would use the
+            // incorrect contract for it.
+            break if id == -n {
+                OverlappedState::Complete
+            } else {
+                OverlappedState::Local
+            };
         };
 
         LockResult::Ok(LockGuard {
@@ -125,6 +148,12 @@ impl Header {
         }
 
         false
+    }
+
+    /// Unlock access to resources associated with this operation.
+    #[inline]
+    pub fn unlock_to_open(&self) {
+        self.lock.store(0, Ordering::SeqCst);
     }
 
     /// Wake the async task waiting for this I/O to complete.
@@ -205,7 +234,7 @@ impl LockGuard<'_> {
 impl Drop for LockGuard<'_> {
     fn drop(&mut self) {
         self.pool().clear();
-        self.header.unlock();
+        self.header.unlock_to_open();
     }
 }
 

@@ -44,7 +44,7 @@ where
                 std::mem::forget((permit, guard, overlapped));
                 Poll::Pending
             }
-            OverlappedState::Remote => {
+            OverlappedState::Complete => {
                 let pool = guard.pool();
                 let result = self.result()?;
                 // Safety: this point is synchronized to ensure that no
@@ -90,7 +90,7 @@ where
                 std::mem::forget((permit, guard, overlapped));
                 Poll::Pending
             }
-            OverlappedState::Remote => {
+            OverlappedState::Complete => {
                 let result = self.result()?;
                 guard.advance(result.bytes_transferred);
                 Poll::Ready(Ok(result.bytes_transferred))

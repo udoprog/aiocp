@@ -56,7 +56,7 @@ where
                 std::mem::forget((permit, guard, overlapped));
                 Poll::Pending
             }
-            OverlappedState::Remote => {
+            OverlappedState::Complete => {
                 let result = self.io.result()?;
                 let (output, outcome) = self.op.collect(result, guard.pool())?;
                 outcome.apply_to(&guard);
@@ -72,7 +72,7 @@ where
     H: AsRawHandle,
 {
     fn drop(&mut self) {
-        if let OverlappedState::Remote = self.io.header.state() {
+        if let OverlappedState::Complete = self.io.header.state() {
             self.io.cancel_if_pending();
         }
     }

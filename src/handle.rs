@@ -64,13 +64,15 @@ where
     }
 
     /// Duplicate this handle, allowing more than one pending I/O operation to
-    /// happen over it in parallel.
+    /// happen over it concurrently.
     ///
     /// The underlying handle must implement [Clone], which it can trivially do
     /// if it's wrapped in something like an [Arc].
     ///
     /// The returned file handle does not inherit the state of the handle it was
-    /// cloned from. It has no pending operations.
+    /// cloned from. It has no pending operations. It also doesn't cause any
+    /// racing with the current handle and is free to perform other kinds of
+    /// operations.
     ///
     /// # Examples
     ///
@@ -131,7 +133,7 @@ where
 
     /// Cancel if we know there's an operation running in the background.
     pub fn cancel_if_pending(&self) {
-        if let OverlappedState::Remote = self.header.state() {
+        if let OverlappedState::Complete = self.header.state() {
             self.cancel_immediate();
         }
     }
