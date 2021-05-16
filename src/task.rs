@@ -1,5 +1,5 @@
 use crate::atomic_waker::AtomicWaker;
-use crate::io::{Overlapped, OverlappedState};
+use crate::io::OverlappedState;
 use crate::operation;
 use crate::pool::BufferPool;
 use std::cell::UnsafeCell;
@@ -12,8 +12,8 @@ use winapi::um::minwinbase;
 
 #[repr(C)]
 pub(crate) struct Header {
-    raw: UnsafeCell<minwinbase::OVERLAPPED>,
-    pool: BufferPool,
+    pub(crate) raw: UnsafeCell<minwinbase::OVERLAPPED>,
+    pub(crate) pool: BufferPool,
     /// Lock for the current overlapped operation.
     ///
     /// This can have one of three states:
@@ -27,7 +27,7 @@ pub(crate) struct Header {
     /// The task of the [lock] function is to find the lock in the open state -
     /// or try and work a lock which is in the negative state atomically into
     /// the open state.
-    lock: AtomicI64,
+    pub(crate) lock: AtomicI64,
     waker: AtomicWaker,
 }
 
@@ -75,17 +75,14 @@ impl Header {
     /// The state of the overlapped guard.
     pub(crate) fn state(&self) -> OverlappedState {
         if self.lock.load(Ordering::SeqCst) <= 0 {
-            OverlappedState::Local
+            OverlappedState::Idle
         } else {
-            OverlappedState::Complete
+            OverlappedState::Pending
         }
     }
 
     /// Try to lock the overlap and return the a guard to the locked state.
-    pub(crate) fn lock<'a>(
-        self: &'a Arc<Self>,
-        operation::Code(id): operation::Code,
-    ) -> LockResult<'a> {
+    pub(crate) fn header_lock(&self, operation::Code(id): operation::Code) -> LockResult {
         let id = id as i64 + 1; // to ensure that we never use 0
 
         let state = loop {
@@ -94,7 +91,7 @@ impl Header {
                 .compare_exchange_weak(0, id, Ordering::SeqCst, Ordering::Relaxed);
 
             let n = match op {
-                Ok(..) => break OverlappedState::Local,
+                Ok(..) => break OverlappedState::Idle,
                 Err(n) => n,
             };
 
@@ -118,16 +115,13 @@ impl Header {
             // If we were to just complete the operation, we would use the
             // incorrect contract for it.
             break if id == -n {
-                OverlappedState::Complete
+                OverlappedState::Pending
             } else {
-                OverlappedState::Local
+                OverlappedState::Idle
             };
         };
 
-        LockResult::Ok(LockGuard {
-            header: self,
-            state,
-        })
+        LockResult::Ok(state)
     }
 
     /// Unlock access to resources associated with this operation.
@@ -171,77 +165,10 @@ impl fmt::Debug for Header {
     }
 }
 
-/// A lock guard that will unlock the resource if dropped.
-///
-/// Dropping the guard automatically clears the available buffers and unlocks
-/// the header.
-pub(crate) struct LockGuard<'a> {
-    header: &'a Arc<Header>,
-    state: OverlappedState,
-}
-
-impl LockGuard<'_> {
-    /// Clear and return the current pool.
-    pub fn clear_and_get_pool(&self) -> &BufferPool {
-        let pool = self.pool();
-        pool.clear();
-        pool
-    }
-
-    /// Get the state of the guard.
-    pub fn state(&self) -> OverlappedState {
-        self.state
-    }
-
-    /// Access the pool associated with the locked state of the header.
-    pub fn pool(&self) -> &BufferPool {
-        &self.header.pool
-    }
-
-    /// Advance the cursor of the overlapped structure by `amount`.
-    ///
-    /// This is used by read or write operations to move the read or write
-    /// cursor forward.
-    pub fn advance(&self, amount: usize) {
-        use std::convert::TryFrom as _;
-
-        trace!(amount = amount, "advance");
-
-        // Safety: this is done in the guard, which ensures exclusive access.
-        unsafe {
-            let overlapped = &mut *self.header.raw.get();
-            let s = overlapped.u.s_mut();
-            let mut n = s.Offset as u64 | (s.OffsetHigh as u64) << 32;
-
-            n = u64::try_from(amount)
-                .ok()
-                .and_then(|amount| n.checked_add(amount))
-                .expect("advance out of bounds");
-
-            s.Offset = (n & !0u32 as u64) as u32;
-            s.OffsetHigh = (n >> 32) as u32;
-        }
-    }
-
-    /// Get the current header as an overlapped pointer.
-    pub fn overlapped(&self) -> Overlapped {
-        Overlapped::from_raw(
-            Arc::into_raw(self.header.clone()) as *const minwinbase::OVERLAPPED as *mut _,
-        )
-    }
-}
-
-impl Drop for LockGuard<'_> {
-    fn drop(&mut self) {
-        self.pool().clear();
-        self.header.unlock_to_open();
-    }
-}
-
 /// The result of trying to lock the overlapped header.
-pub(crate) enum LockResult<'a> {
+pub(crate) enum LockResult {
     /// Locking succeeded.
-    Ok(LockGuard<'a>),
+    Ok(OverlappedState),
     /// Locking failed because it's busy. Flag indicates if there was a mismatch
     /// in the type of operation.
     ///

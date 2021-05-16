@@ -5,11 +5,12 @@ use winapi::um::minwinbase;
 /// during locking.
 #[derive(Debug, Clone, Copy)]
 pub enum OverlappedState {
-    /// The driver currently owns the operation. The critical section associated
-    /// with the operation is owned by the driver.
-    Local,
-    /// The remote completion port has marked that an operation is completed.
-    Complete,
+    /// The operation is idle, and the local task owns all resources associated
+    /// with it.
+    Idle,
+    /// An operation is pending on the remote completion port. The remote
+    /// completion port owns all resources associated with it.
+    Pending,
 }
 
 /// An overlapped structure.

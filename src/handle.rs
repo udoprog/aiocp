@@ -1,8 +1,10 @@
+use crate::io::Overlapped;
 use crate::io::OverlappedState;
 use crate::ioctl;
 use crate::operation::{self, Operation};
 use crate::operation_poller::OperationPoller;
-use crate::task::Header;
+use crate::pool::BufferPool;
+use crate::task::{Header, LockResult};
 use std::convert::TryFrom as _;
 use std::fmt;
 use std::future::Future;
@@ -17,6 +19,7 @@ use winapi::shared::minwindef::FALSE;
 use winapi::shared::winerror;
 use winapi::um::errhandlingapi;
 use winapi::um::ioapiset;
+use winapi::um::minwinbase;
 
 /// The results of an overlapped operation.
 #[derive(Debug, Clone, Copy)]
@@ -123,17 +126,16 @@ where
     ///
     /// If the operation indicates that it needs to block, the returned future
     /// will complete once the operation has completed.
-    pub async fn run<O>(&mut self, op: O) -> io::Result<O::Output>
+    pub async fn run_operation<O>(&mut self, op: O) -> io::Result<O::Output>
     where
-        H: AsRawHandle,
         O: Operation<H>,
     {
-        Run::new(self, op).await
+        RunOperation::new(self, op).await
     }
 
     /// Cancel if we know there's an operation running in the background.
     pub fn cancel_if_pending(&self) {
-        if let OverlappedState::Complete = self.header.state() {
+        if let OverlappedState::Pending = self.header.state() {
             self.cancel_immediate();
         }
     }
@@ -153,7 +155,7 @@ where
     where
         B: AsRef<[u8]>,
     {
-        self.run(operation::Write::new(buf)).await
+        self.run_operation(operation::Write::new(buf)).await
     }
 
     /// Write the given buffer and return the number of bytes written.
@@ -161,13 +163,13 @@ where
     where
         B: AsMut<[u8]>,
     {
-        self.run(operation::Read::new(buf)).await
+        self.run_operation(operation::Read::new(buf)).await
     }
 
     /// Connect the current handle, under the assumption that it is the server
     /// side of a named pipe.
     pub async fn connect_named_pipe(&mut self) -> io::Result<()> {
-        self.run(operation::ConnectNamedPipe::new()).await
+        self.run_operation(operation::ConnectNamedPipe::new()).await
     }
 
     /// Connect the current handle, under the assumption that it is the server
@@ -176,39 +178,8 @@ where
     where
         M: ioctl::Ioctl,
     {
-        self.run(operation::DeviceIoCtl::new(message)).await
-    }
-
-    /// Get the overlapped result from the current structure.
-    pub(crate) fn result(&self) -> io::Result<OverlappedResult>
-    where
-        H: AsRawHandle,
-    {
-        // Safety: All of there operations are safe and it is guaranteed that
-        // we have access to the underlying handles.
-        unsafe {
-            let mut bytes_transferred = mem::MaybeUninit::zeroed();
-
-            let result = ioapiset::GetOverlappedResult(
-                self.handle.as_raw_handle() as *mut _,
-                self.header.as_raw_overlapped(),
-                bytes_transferred.as_mut_ptr(),
-                FALSE,
-            );
-
-            if result == FALSE {
-                return match errhandlingapi::GetLastError() {
-                    winerror::ERROR_HANDLE_EOF => Ok(OverlappedResult::empty()),
-                    winerror::ERROR_BROKEN_PIPE => Ok(OverlappedResult::empty()),
-                    other => Err(io::Error::from_raw_os_error(other as i32)),
-                };
-            }
-
-            let bytes_transferred = usize::try_from(bytes_transferred.assume_init())
-                .expect("bytes transferred out of bounds");
-
-            Ok(OverlappedResult { bytes_transferred })
-        }
+        self.run_operation(operation::DeviceIoCtl::new(message))
+            .await
     }
 
     /// Register a new waker.
@@ -222,7 +193,7 @@ where
     /// # Safety
     ///
     /// Issue a cancellation.
-    pub(crate) fn cancel_immediate(&self) {
+    fn cancel_immediate(&self) {
         // Safety: there's nothing inherently unsafe about this, both the header
         // pointer and the local handle are guaranteed to be alive for the
         // duration of this object.
@@ -232,6 +203,31 @@ where
                 self.header.as_raw_overlapped(),
             );
         }
+    }
+
+    pub(crate) fn lock<'a>(
+        &'a mut self,
+        code: operation::Code,
+        waker: &Waker,
+    ) -> io::Result<Option<LockGuard<'a, H>>> {
+        let permit = self.port.permit()?;
+        self.register_by_ref(waker);
+
+        Ok(match self.header.header_lock(code) {
+            LockResult::Ok(state) => Some(LockGuard {
+                handle: &mut self.handle,
+                header: &self.header,
+                state,
+                _permit: permit,
+            }),
+            LockResult::Busy(mismatch) => {
+                if mismatch {
+                    self.cancel_immediate();
+                }
+
+                None
+            }
+        })
     }
 }
 
@@ -269,7 +265,7 @@ where
 }
 
 /// An operation performed over the completion port.
-pub(crate) struct Run<'a, H, O>
+pub(crate) struct RunOperation<'a, H, O>
 where
     H: AsRawHandle,
     O: Operation<H>,
@@ -277,7 +273,7 @@ where
     state: State<'a, H, O>,
 }
 
-impl<'a, H, O> Run<'a, H, O>
+impl<'a, H, O> RunOperation<'a, H, O>
 where
     H: AsRawHandle,
     O: Operation<H>,
@@ -292,7 +288,7 @@ where
     }
 }
 
-impl<'a, H, O> Future for Run<'a, H, O>
+impl<'a, H, O> Future for RunOperation<'a, H, O>
 where
     H: AsRawHandle,
     O: Operation<H>,
@@ -317,6 +313,111 @@ where
                 "polled after completion",
             ))),
         }
+    }
+}
+
+/// A lock guard that will unlock the resource if dropped.
+///
+/// Dropping the guard automatically clears the available buffers and unlocks
+/// the header.
+pub(crate) struct LockGuard<'a, H>
+where
+    H: AsRawHandle,
+{
+    handle: &'a mut H,
+    header: &'a Arc<Header>,
+    state: OverlappedState,
+    _permit: crate::sys::CompletionPortPermit<'a>,
+}
+
+impl<'a, H> LockGuard<'a, H>
+where
+    H: AsRawHandle,
+{
+    /// Prepare the information.
+    pub fn prepare(&mut self) -> (&BufferPool, Overlapped, &mut H) {
+        let pool = &self.header.pool;
+        pool.clear();
+
+        let overlapped = Overlapped::from_raw(Arc::into_raw(self.header.clone())
+            as *const minwinbase::OVERLAPPED
+            as *mut _);
+
+        (pool, overlapped, &mut *self.handle)
+    }
+
+    /// Get the state of the guard.
+    pub fn state(&self) -> OverlappedState {
+        self.state
+    }
+
+    /// Access the pool associated with the locked state of the header.
+    pub fn pool(&self) -> &BufferPool {
+        &self.header.pool
+    }
+
+    /// Get the overlapped result from the current structure.
+    pub(crate) fn result(&self) -> io::Result<OverlappedResult> {
+        // Safety: All of there operations are safe and it is guaranteed that
+        // we have access to the underlying handles.
+        unsafe {
+            let mut bytes_transferred = mem::MaybeUninit::zeroed();
+
+            let result = ioapiset::GetOverlappedResult(
+                self.handle.as_raw_handle() as *mut _,
+                self.header.as_raw_overlapped(),
+                bytes_transferred.as_mut_ptr(),
+                FALSE,
+            );
+
+            if result == FALSE {
+                return match errhandlingapi::GetLastError() {
+                    winerror::ERROR_HANDLE_EOF => Ok(OverlappedResult::empty()),
+                    winerror::ERROR_BROKEN_PIPE => Ok(OverlappedResult::empty()),
+                    other => Err(io::Error::from_raw_os_error(other as i32)),
+                };
+            }
+
+            let bytes_transferred = usize::try_from(bytes_transferred.assume_init())
+                .expect("bytes transferred out of bounds");
+
+            Ok(OverlappedResult { bytes_transferred })
+        }
+    }
+
+    /// Advance the cursor of the overlapped structure by `amount`.
+    ///
+    /// This is used by read or write operations to move the read or write
+    /// cursor forward.
+    pub fn advance(&self, amount: usize) {
+        use std::convert::TryFrom as _;
+
+        trace!(amount = amount, "advance");
+
+        // Safety: this is done in the guard, which ensures exclusive access.
+        unsafe {
+            let overlapped = &mut *self.header.raw.get();
+            let s = overlapped.u.s_mut();
+            let mut n = s.Offset as u64 | (s.OffsetHigh as u64) << 32;
+
+            n = u64::try_from(amount)
+                .ok()
+                .and_then(|amount| n.checked_add(amount))
+                .expect("advance out of bounds");
+
+            s.Offset = (n & !0u32 as u64) as u32;
+            s.OffsetHigh = (n >> 32) as u32;
+        }
+    }
+}
+
+impl<H> Drop for LockGuard<'_, H>
+where
+    H: AsRawHandle,
+{
+    fn drop(&mut self) {
+        self.header.pool.clear();
+        self.header.unlock_to_open();
     }
 }
 

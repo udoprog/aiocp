@@ -1,11 +1,10 @@
 //! Abstractions for building raw overlapping operation helpers.
 
 use crate::ext::HandleExt as _;
-use crate::handle::OverlappedResult;
+use crate::handle::{LockGuard, OverlappedResult};
 use crate::io::Overlapped;
 use crate::ioctl;
 use crate::pool::BufferPool;
-use crate::task::LockGuard;
 use std::io;
 use std::os::windows::io::AsRawHandle;
 
@@ -44,7 +43,10 @@ pub enum OverlappedOutcome {
 }
 
 impl OverlappedOutcome {
-    pub(crate) fn apply_to(self, guard: &LockGuard<'_>) {
+    pub(crate) fn apply_to<H>(self, guard: &LockGuard<'_, H>)
+    where
+        H: AsRawHandle,
+    {
         match self {
             Self::None => (),
             Self::Advance(n) => {

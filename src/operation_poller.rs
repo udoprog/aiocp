@@ -1,7 +1,6 @@
 use crate::handle::Handle;
 use crate::io::OverlappedState;
 use crate::operation::Operation;
-use crate::task::LockResult;
 use std::io;
 use std::os::windows::io::AsRawHandle;
 use std::task::{Context, Poll};
@@ -33,31 +32,21 @@ where
     where
         H: AsRawHandle,
     {
-        let permit = self.io.port.permit()?;
-        self.io.register_by_ref(cx.waker());
-
-        let guard = match self.io.header.lock(O::CODE) {
-            LockResult::Ok(guard) => guard,
-            LockResult::Busy(mismatch) => {
-                if mismatch {
-                    self.io.cancel_immediate();
-                }
-
-                return Poll::Pending;
-            }
+        let mut guard = match self.io.lock(O::CODE, cx.waker())? {
+            Some(guard) => guard,
+            None => return Poll::Pending,
         };
 
         match guard.state() {
-            OverlappedState::Local => {
-                let pool = guard.clear_and_get_pool();
-                let mut overlapped = guard.overlapped();
-                let result = self.op.prepare(&mut self.io.handle, &mut overlapped, pool);
+            OverlappedState::Idle => {
+                let (pool, mut overlapped, handle) = guard.prepare();
+                let result = self.op.prepare(handle, &mut overlapped, pool);
                 crate::handle::handle_io_pending(result)?;
-                std::mem::forget((permit, guard, overlapped));
+                std::mem::forget((guard, overlapped));
                 Poll::Pending
             }
-            OverlappedState::Complete => {
-                let result = self.io.result()?;
+            OverlappedState::Pending => {
+                let result = guard.result()?;
                 let (output, outcome) = self.op.collect(result, guard.pool())?;
                 outcome.apply_to(&guard);
                 Poll::Ready(Ok(output))
@@ -72,7 +61,7 @@ where
     H: AsRawHandle,
 {
     fn drop(&mut self) {
-        if let OverlappedState::Complete = self.io.header.state() {
+        if let OverlappedState::Pending = self.io.header.state() {
             self.io.cancel_if_pending();
         }
     }

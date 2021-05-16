@@ -2,7 +2,6 @@ use crate::ext::HandleExt as _;
 use crate::handle::Handle;
 use crate::io::OverlappedState;
 use crate::operation;
-use crate::task::LockResult;
 use std::io;
 use std::os::windows::io::AsRawHandle;
 use std::pin::Pin;
@@ -18,35 +17,26 @@ where
         H: AsRawHandle,
     {
         trace!(op = "read", "poll");
-        let permit = self.port.permit()?;
-        self.register_by_ref(cx.waker());
 
-        let guard = match self.header.lock(operation::READ) {
-            LockResult::Ok(guard) => guard,
-            LockResult::Busy(mismatch) => {
-                if mismatch {
-                    self.cancel_immediate();
-                }
-
-                return Poll::Pending;
-            }
+        let mut guard = match self.lock(operation::READ, cx.waker())? {
+            Some(guard) => guard,
+            None => return Poll::Pending,
         };
 
         trace!(op = "read", state = ?guard.state(), "unlocked");
 
         match guard.state() {
-            OverlappedState::Local => {
-                let pool = guard.clear_and_get_pool();
+            OverlappedState::Idle => {
+                let (pool, mut overlapped, handle) = guard.prepare();
                 let mut b = pool.take(buf.remaining());
-                let mut overlapped = guard.overlapped();
-                let result = self.handle.read_overlapped(&mut b, &mut overlapped);
+                let result = handle.read_overlapped(&mut b, &mut overlapped);
                 crate::handle::handle_io_pending(result)?;
-                std::mem::forget((permit, guard, overlapped));
+                std::mem::forget((guard, overlapped));
                 Poll::Pending
             }
-            OverlappedState::Complete => {
+            OverlappedState::Pending => {
                 let pool = guard.pool();
-                let result = self.result()?;
+                let result = guard.result()?;
                 // Safety: this point is synchronized to ensure that no
                 // remote buffers are used.
                 let b = pool.release(result.bytes_transferred);
@@ -63,35 +53,26 @@ where
         H: AsRawHandle,
     {
         trace!(op = "write", "poll");
-        let permit = self.port.permit()?;
-        self.register_by_ref(cx.waker());
 
-        let guard = match self.header.lock(operation::WRITE) {
-            LockResult::Ok(guard) => guard,
-            LockResult::Busy(mismatch) => {
-                if mismatch {
-                    self.cancel_immediate();
-                }
-
-                return Poll::Pending;
-            }
+        let mut guard = match self.lock(operation::WRITE, cx.waker())? {
+            Some(guard) => guard,
+            None => return Poll::Pending,
         };
 
         trace!(op = "write", state = ?guard.state(), "unlocked");
 
         match guard.state() {
-            OverlappedState::Local => {
-                let pool = guard.clear_and_get_pool();
+            OverlappedState::Idle => {
+                let (pool, mut overlapped, handle) = guard.prepare();
                 let mut b = pool.take(buf.len());
                 b.put_slice(buf);
-                let mut overlapped = guard.overlapped();
-                let result = self.handle.write_overlapped(b.filled(), &mut overlapped);
+                let result = handle.write_overlapped(b.filled(), &mut overlapped);
                 crate::handle::handle_io_pending(result)?;
-                std::mem::forget((permit, guard, overlapped));
+                std::mem::forget((guard, overlapped));
                 Poll::Pending
             }
-            OverlappedState::Complete => {
-                let result = self.result()?;
+            OverlappedState::Pending => {
+                let result = guard.result()?;
                 guard.advance(result.bytes_transferred);
                 Poll::Ready(Ok(result.bytes_transferred))
             }
