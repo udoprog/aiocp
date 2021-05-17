@@ -1,6 +1,5 @@
 use crate::atomic_waker::AtomicWaker;
-use crate::io::OverlappedState;
-use crate::operation;
+use crate::io::{Code, OverlappedState};
 use crate::pool::BufferPool;
 use std::cell::UnsafeCell;
 use std::fmt;
@@ -82,7 +81,7 @@ impl Header {
     }
 
     /// Try to lock the overlap and return the a guard to the locked state.
-    pub(crate) fn header_lock(&self, operation::Code(id): operation::Code) -> LockResult {
+    pub(crate) fn header_lock(&self, Code(id): Code) -> LockResult {
         let id = id as i64 + 1; // to ensure that we never use 0
 
         let state = loop {

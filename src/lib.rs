@@ -15,9 +15,6 @@ pub mod flags;
 
 mod errors;
 
-mod ext;
-pub use self::ext::HandleExt;
-
 mod completion_port;
 pub use self::completion_port::{
     CompletionOutcome, CompletionPoll, CompletionPort, CompletionStatus, RegisterOptions,
@@ -36,8 +33,6 @@ pub use self::handle::Handle;
 
 mod socket;
 pub use self::socket::Socket;
-
-pub mod operation;
 
 mod pool;
 pub use self::pool::BufferPool;

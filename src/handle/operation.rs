@@ -1,7 +1,8 @@
 //! Abstractions for building raw overlapping operation helpers.
 
-use crate::ext::HandleExt as _;
-use crate::io::{Flavor, LockGuard, Overlapped, OverlappedResult};
+use crate::handle::ext::HandleExt as _;
+use crate::handle::LockGuard;
+use crate::io::{Code, Overlapped, OverlappedResult};
 use crate::ioctl;
 use crate::pool::BufferPool;
 use crate::sys::AsRawHandle;
@@ -26,13 +27,6 @@ pub const IO_CTL: Code = Code(0x7f_ff_ff_03);
 /// The lock code for named pipe connect operations.
 pub const CONNECT_NAMED_PIPE: Code = Code(0x7f_ff_ff_04);
 
-/// A unique code that designates exactly how any one given overlapped result
-/// must be treated. This has safety implications, because treating the
-/// overlapped results of something like a WRITE as a READ instead could result
-/// in assuming that uninitialized memory has been initialized by the write
-/// operation.
-pub struct Code(pub(crate) u32);
-
 /// The outcome of an overlapped operation.
 pub enum OverlappedOutcome {
     /// Do not modify the state of the overlapped header.
@@ -42,11 +36,7 @@ pub enum OverlappedOutcome {
 }
 
 impl OverlappedOutcome {
-    pub(crate) fn apply_to<H, I>(self, guard: &LockGuard<'_, H, I>)
-    where
-        H: AsRawHandle,
-        I: Flavor<H>,
-    {
+    pub(crate) fn apply_to<H>(self, guard: &LockGuard<'_, H>) {
         match self {
             Self::None => (),
             Self::Advance(n) => {

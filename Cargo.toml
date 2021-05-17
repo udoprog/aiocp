@@ -25,6 +25,7 @@ features = [
     "winerror",
     "namedpipeapi",
     "errhandlingapi",
+    "mswsock",
 ]
 
 [dev-dependencies]

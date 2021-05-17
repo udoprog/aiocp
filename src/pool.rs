@@ -1,8 +1,18 @@
-use std::cell::Cell;
-use std::cell::UnsafeCell;
-use std::mem::MaybeUninit;
+use std::cell::{Cell, UnsafeCell};
+use std::mem;
 use std::slice;
 use tokio::io::ReadBuf;
+use winapi::um::winsock2;
+
+/// A pointer to the buffer for a socket to receive.
+pub struct SocketBuf<'a>(ReadBuf<'a>);
+
+impl SocketBuf<'_> {
+    /// Access the underlying pointer.
+    pub unsafe fn as_mut_ptr(&mut self) -> *mut mem::MaybeUninit<u8> {
+        self.0.unfilled_mut().as_mut_ptr()
+    }
+}
 
 /// A pool of I/O buffers.
 pub struct BufferPool {
@@ -57,11 +67,19 @@ impl BufferPool {
                 buf.reserve(size - buf.capacity());
             }
 
-            let buf =
-                slice::from_raw_parts_mut(buf.as_mut_ptr() as *mut MaybeUninit<u8>, buf.capacity());
+            let buf = slice::from_raw_parts_mut(
+                buf.as_mut_ptr() as *mut mem::MaybeUninit<u8>,
+                buf.capacity(),
+            );
             let buf = ReadBuf::uninit(&mut buf[..size]);
             buf
         }
+    }
+
+    /// Take a socket buffer.
+    pub fn take_socket_buf(&self) -> SocketBuf {
+        let buf = self.take(mem::size_of::<winsock2::SOCKET>());
+        SocketBuf(buf)
     }
 
     /// Reclaim the given buffer and decrease increase the number of taken
@@ -105,6 +123,12 @@ impl BufferPool {
             buf.set_filled(len);
             buf
         }
+    }
+
+    /// Take a socket buffer.
+    pub fn release_socket_buf(&self) -> SocketBuf {
+        let buf = self.release(mem::size_of::<winsock2::SOCKET>());
+        SocketBuf(buf)
     }
 
     /// Indicates that there's no pending operations and that this can be safely
