@@ -1,5 +1,6 @@
 use crate::handle::Handle;
-use crate::sys::AsRawHandle;
+use crate::socket::Socket;
+use crate::sys::{AsRawHandle, AsRawSocket};
 use crate::task::Header;
 use std::fmt;
 use std::io;
@@ -88,6 +89,17 @@ impl CompletionPort {
     {
         self.imp
             .register_handle(handle, options.key, options.max_buffer_size)
+    }
+
+    /// Register the given socket for overlapped I/O and allocate buffers with
+    /// the specified capacities that can be used inside of an operation with
+    /// it.
+    pub fn register_socket<S>(&self, socket: S, options: RegisterOptions) -> io::Result<Socket<S>>
+    where
+        S: AsRawSocket,
+    {
+        self.imp
+            .register_socket(socket, options.key, options.max_buffer_size)
     }
 
     /// Shut down the current completion port. This will cause

@@ -1,10 +1,11 @@
 use crate::completion_port::{CompletionOutcome, CompletionPoll, CompletionStatus, Shutdown};
 use crate::handle::Handle;
+use crate::socket::Socket;
 use crate::task::Header;
 use std::fmt;
 use std::io;
 use std::mem;
-pub use std::os::windows::io::{AsRawHandle, RawHandle};
+pub use std::os::windows::io::{AsRawHandle, AsRawSocket, RawHandle, RawSocket};
 use std::ptr;
 use std::sync::atomic::{AtomicIsize, Ordering};
 use std::sync::Arc;
@@ -121,6 +122,43 @@ impl CompletionPort {
         }
 
         Ok(Handle::new(handle, self.clone(), max_buffer_size))
+    }
+
+    /// Associate a new socket with the I/O completion port.
+    ///
+    /// This means any overlapped operations associated with the given handle
+    /// will notify this completion port.
+    pub(crate) fn register_socket<S>(
+        &self,
+        socket: S,
+        key: usize,
+        max_buffer_size: usize,
+    ) -> io::Result<Socket<S>>
+    where
+        S: AsRawSocket,
+    {
+        if key >= RESERVED_PORTS {
+            return Err(io::Error::new(
+                io::ErrorKind::Other,
+                "trying to use reserved completion port",
+            ));
+        }
+
+        // Safety: there's nothing inherently unsafe about this.
+        unsafe {
+            let handle = ioapiset::CreateIoCompletionPort(
+                socket.as_raw_socket() as *mut _,
+                self.inner.handle,
+                key,
+                0,
+            );
+
+            if handle.is_null() {
+                return Err(io::Error::last_os_error());
+            }
+        }
+
+        Ok(Socket::new(socket, self.clone(), max_buffer_size))
     }
 
     /// Post a message to the I/O completion port.

@@ -11,6 +11,14 @@ pub trait AsRawHandle {
     }
 }
 
+pub struct RawSocket(());
+
+pub trait AsRawSocket {
+    fn as_raw_socket(&self) -> RawSocket {
+        unreachable!()
+    }
+}
+
 #[derive(Debug)]
 pub(crate) struct CompletionPort(());
 
