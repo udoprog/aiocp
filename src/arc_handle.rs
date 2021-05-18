@@ -1,4 +1,4 @@
-use crate::sys::{AsRawHandle, RawHandle};
+use std::os::windows::io::{AsRawHandle, RawHandle};
 use std::sync::Arc;
 
 /// Wraps the interior type `H` which implements [AsRawHandle] in an atomically

@@ -1,7 +1,7 @@
-use crate::sys::{AsRawHandle, RawHandle};
 use std::ffi::OsStr;
 use std::io;
 use std::os::windows::ffi::OsStrExt as _;
+use std::os::windows::io::{AsRawHandle, RawHandle};
 use std::ptr;
 use winapi::shared::minwindef::DWORD;
 use winapi::um::handleapi;

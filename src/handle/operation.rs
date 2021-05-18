@@ -5,8 +5,8 @@ use crate::handle::LockGuard;
 use crate::io::{Code, Overlapped, OverlappedResult};
 use crate::ioctl;
 use crate::pool::BufferPool;
-use crate::sys::AsRawHandle;
 use std::io;
+use std::os::windows::io::AsRawHandle;
 
 /// The lock code for read-like operations.
 ///

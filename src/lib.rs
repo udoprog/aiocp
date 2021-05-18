@@ -1,14 +1,6 @@
 #[macro_use]
 mod macros;
 
-#[cfg(not(docsrs))]
-#[path = "sys/sys.rs"]
-mod sys;
-
-#[cfg(docsrs)]
-#[path = "sys/doc.rs"]
-mod sys;
-
 mod atomic_waker;
 
 pub mod flags;

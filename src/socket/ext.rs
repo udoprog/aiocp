@@ -1,9 +1,9 @@
 use crate::io::Overlapped;
 use crate::pool::SocketBuf;
-use crate::sys::AsRawSocket;
 use std::convert::TryFrom as _;
 use std::io;
 use std::mem;
+use std::os::windows::io::AsRawSocket;
 use tokio::io::ReadBuf;
 use winapi::shared::minwindef::{DWORD, FALSE};
 use winapi::um::mswsock;
@@ -46,7 +46,7 @@ where
 
             let result = mswsock::AcceptEx(
                 self.as_raw_socket() as winsock2::SOCKET,
-                accept.as_mut_ptr() as winsock2::SOCKET,
+                accept.as_raw_socket(),
                 output_buf.as_mut_ptr() as *mut _,
                 output_buf_len,
                 local_address_len,

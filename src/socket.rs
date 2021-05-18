@@ -1,13 +1,13 @@
+use crate::completion_port::{CompletionPort, CompletionPortPermit};
 use crate::io::{Code, Overlapped, OverlappedResult, OverlappedState};
-use crate::pool::BufferPool;
-use crate::sys::AsRawSocket;
+use crate::pool::{BufferPool, SocketPool};
 use crate::task::{Header, LockResult};
 use std::convert::TryFrom as _;
 use std::fmt;
 use std::future::Future;
 use std::io;
 use std::mem;
-use std::os::windows::io::FromRawSocket;
+use std::os::windows::io::{AsRawSocket, FromRawSocket};
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll, Waker};
@@ -16,6 +16,8 @@ use winapi::shared::winerror;
 use winapi::um::errhandlingapi;
 use winapi::um::ioapiset;
 use winapi::um::minwinbase;
+use winapi::um::processthreadsapi;
+use winapi::um::winsock2;
 
 mod operation;
 use self::operation::Operation;
@@ -28,8 +30,10 @@ where
     S: AsRawSocket,
 {
     pub(crate) socket: S,
-    pub(crate) port: crate::sys::CompletionPort,
+    pub(crate) port: CompletionPort,
     pub(crate) header: Arc<Header>,
+    pub(crate) pool: BufferPool,
+    pub(crate) sockets: SocketPool,
 }
 
 impl<S> Socket<S>
@@ -37,12 +41,30 @@ where
     S: AsRawSocket,
 {
     /// Construct a socket wrapper capable of overlapped operations.
-    pub(crate) fn new(socket: S, port: crate::sys::CompletionPort, max_buffer_size: usize) -> Self {
-        Self {
+    pub(crate) fn new(socket: S, port: CompletionPort, max_buffer_size: usize) -> io::Result<Self> {
+        let info = unsafe {
+            let mut info = mem::MaybeUninit::uninit();
+
+            let result = winsock2::WSADuplicateSocketW(
+                socket.as_raw_socket() as winsock2::SOCKET,
+                processthreadsapi::GetCurrentProcessId(),
+                info.as_mut_ptr(),
+            );
+
+            if result != FALSE {
+                return Err(io::Error::last_os_error());
+            }
+
+            Arc::new(info.assume_init())
+        };
+
+        Ok(Self {
             socket,
             port,
-            header: Arc::new(Header::new(max_buffer_size)),
-        }
+            header: Arc::new(Header::new()),
+            pool: BufferPool::new(max_buffer_size),
+            sockets: SocketPool::new(info),
+        })
     }
 
     /// Duplicate this socket, allowing more than one pending I/O operation to
@@ -59,12 +81,14 @@ where
     where
         S: Clone,
     {
-        let max_buffer_size = self.header.pool.max_buffer_size();
+        let max_buffer_size = self.pool.max_buffer_size();
 
         Self {
             socket: self.socket.clone(),
             port: self.port.clone(),
-            header: Arc::new(Header::new(max_buffer_size)),
+            header: Arc::new(Header::new()),
+            pool: BufferPool::new(max_buffer_size),
+            sockets: SocketPool::new(self.sockets.info()),
         }
     }
 
@@ -117,8 +141,10 @@ where
             LockResult::Ok(state) => Some(LockGuard {
                 socket: &mut self.socket,
                 header: &self.header,
+                pool: &mut self.pool,
+                sockets: &mut self.sockets,
                 state,
-                _permit: permit,
+                permit,
             }),
             LockResult::Busy(mismatch) => {
                 if mismatch {
@@ -233,16 +259,21 @@ where
 
                 let output = match guard.state() {
                     OverlappedState::Idle => {
-                        let (pool, mut overlapped, socket) = guard.prepare();
-                        let result = op.prepare(socket, &mut overlapped, pool);
+                        let (pool, sockets, mut overlapped, socket) = guard.prepare();
+                        let result = op.prepare(socket, &mut overlapped, pool, sockets);
                         crate::io::handle_io_pending(result)?;
                         std::mem::forget((guard, overlapped));
                         return Poll::Pending;
                     }
                     OverlappedState::Pending => {
                         let result = guard.result()?;
-                        let (output, outcome) = op.collect(result, guard.pool())?;
-                        outcome.apply_to(&guard);
+                        let (output, outcome) = op.collect(
+                            result,
+                            guard.permit.port,
+                            &mut guard.pool,
+                            &mut guard.sockets,
+                        )?;
+                        outcome.apply_to(&mut guard);
                         output
                     }
                 };
@@ -266,11 +297,16 @@ where
 ///
 /// Dropping the guard automatically clears the available buffers and unlocks
 /// the header.
-pub(crate) struct LockGuard<'a, S> {
+pub(crate) struct LockGuard<'a, S>
+where
+    S: AsRawSocket,
+{
     socket: &'a mut S,
     header: &'a Arc<Header>,
+    pool: &'a mut BufferPool,
+    sockets: &'a mut SocketPool,
     state: OverlappedState,
-    _permit: crate::sys::CompletionPortPermit<'a>,
+    permit: CompletionPortPermit<'a>,
 }
 
 impl<'a, S> LockGuard<'a, S>
@@ -307,17 +343,22 @@ where
     }
 }
 
-impl<S> LockGuard<'_, S> {
+impl<S> LockGuard<'_, S>
+where
+    S: AsRawSocket,
+{
     /// Prepare the information.
-    pub fn prepare(&mut self) -> (&BufferPool, Overlapped, &mut S) {
-        let pool = &self.header.pool;
-        pool.clear();
-
+    pub fn prepare(&mut self) -> (&mut BufferPool, &mut SocketPool, Overlapped, &mut S) {
         let overlapped = Overlapped::from_raw(Arc::into_raw(self.header.clone())
             as *const minwinbase::OVERLAPPED
             as *mut _);
 
-        (pool, overlapped, &mut *self.socket)
+        (
+            &mut self.pool,
+            &mut self.sockets,
+            overlapped,
+            &mut self.socket,
+        )
     }
 
     /// Get the state of the guard.
@@ -325,16 +366,11 @@ impl<S> LockGuard<'_, S> {
         self.state
     }
 
-    /// Access the pool associated with the locked state of the header.
-    pub fn pool(&self) -> &BufferPool {
-        &self.header.pool
-    }
-
     /// Advance the cursor of the overlapped structure by `amount`.
     ///
     /// This is used by read or write operations to move the read or write
     /// cursor forward.
-    pub fn advance(&self, amount: usize) {
+    pub fn advance(&mut self, amount: usize) {
         use std::convert::TryFrom as _;
 
         trace!(amount = amount, "advance");
@@ -356,9 +392,13 @@ impl<S> LockGuard<'_, S> {
     }
 }
 
-impl<S> Drop for LockGuard<'_, S> {
+impl<S> Drop for LockGuard<'_, S>
+where
+    S: AsRawSocket,
+{
     fn drop(&mut self) {
-        self.header.pool.clear();
+        self.pool.clear();
+        self.sockets.clear();
         self.header.unlock_to_open();
     }
 }

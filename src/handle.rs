@@ -1,13 +1,14 @@
+use crate::completion_port::{CompletionPort, CompletionPortPermit};
 use crate::io::{Code, Overlapped, OverlappedResult, OverlappedState};
 use crate::ioctl;
 use crate::pool::BufferPool;
-use crate::sys::AsRawHandle;
 use crate::task::{Header, LockResult};
 use std::convert::TryFrom as _;
 use std::fmt;
 use std::future::Future;
 use std::io;
 use std::mem;
+use std::os::windows::io::AsRawHandle;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll, Waker};
@@ -30,8 +31,9 @@ where
     H: AsRawHandle,
 {
     pub(crate) handle: H,
-    pub(crate) port: crate::sys::CompletionPort,
+    pub(crate) port: CompletionPort,
     pub(crate) header: Arc<Header>,
+    pool: BufferPool,
 }
 
 impl<H> Handle<H>
@@ -39,11 +41,12 @@ where
     H: AsRawHandle,
 {
     /// Construct a handle wrapper capable of overlapped operations.
-    pub(crate) fn new(handle: H, port: crate::sys::CompletionPort, max_buffer_size: usize) -> Self {
+    pub(crate) fn new(handle: H, port: CompletionPort, max_buffer_size: usize) -> Self {
         Self {
             handle,
             port,
-            header: Arc::new(Header::new(max_buffer_size)),
+            header: Arc::new(Header::new()),
+            pool: BufferPool::new(max_buffer_size),
         }
     }
 
@@ -95,12 +98,13 @@ where
     where
         H: Clone,
     {
-        let max_buffer_size = self.header.pool.max_buffer_size();
+        let max_buffer_size = self.pool.max_buffer_size();
 
         Self {
             handle: self.handle.clone(),
             port: self.port.clone(),
-            header: Arc::new(Header::new(max_buffer_size)),
+            header: Arc::new(Header::new()),
+            pool: BufferPool::new(max_buffer_size),
         }
     }
 
@@ -131,6 +135,7 @@ where
         Ok(match self.header.header_lock(code) {
             LockResult::Ok(state) => Some(LockGuard {
                 handle: &mut self.handle,
+                pool: &mut self.pool,
                 header: &self.header,
                 state,
                 _permit: permit,
@@ -237,10 +242,8 @@ where
                 Poll::Pending
             }
             OverlappedState::Pending => {
-                let pool = guard.pool();
                 let result = guard.handle_result()?;
-                // Safety: this point is synchronized to ensure that no
-                // remote buffers are used.
+                let pool = guard.pool();
                 let b = pool.release(result.bytes_transferred);
                 let filled = b.filled();
                 buf.put_slice(filled);
@@ -430,9 +433,10 @@ where
 /// the header.
 pub(crate) struct LockGuard<'a, H> {
     handle: &'a mut H,
+    pool: &'a BufferPool,
     header: &'a Arc<Header>,
     state: OverlappedState,
-    _permit: crate::sys::CompletionPortPermit<'a>,
+    _permit: CompletionPortPermit<'a>,
 }
 
 impl<'a, H> LockGuard<'a, H>
@@ -472,14 +476,13 @@ where
 impl<H> LockGuard<'_, H> {
     /// Prepare the information.
     pub fn prepare(&mut self) -> (&BufferPool, Overlapped, &mut H) {
-        let pool = &self.header.pool;
-        pool.clear();
+        self.pool.clear();
 
         let overlapped = Overlapped::from_raw(Arc::into_raw(self.header.clone())
             as *const minwinbase::OVERLAPPED
             as *mut _);
 
-        (pool, overlapped, &mut *self.handle)
+        (&*self.pool, overlapped, &mut *self.handle)
     }
 
     /// Get the state of the guard.
@@ -489,7 +492,7 @@ impl<H> LockGuard<'_, H> {
 
     /// Access the pool associated with the locked state of the header.
     pub fn pool(&self) -> &BufferPool {
-        &self.header.pool
+        &*self.pool
     }
 
     /// Advance the cursor of the overlapped structure by `amount`.
@@ -520,7 +523,7 @@ impl<H> LockGuard<'_, H> {
 
 impl<H> Drop for LockGuard<'_, H> {
     fn drop(&mut self) {
-        self.header.pool.clear();
+        self.pool.clear();
         self.header.unlock_to_open();
     }
 }

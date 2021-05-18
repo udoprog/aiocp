@@ -1,6 +1,5 @@
 use crate::atomic_waker::AtomicWaker;
 use crate::io::{Code, OverlappedState};
-use crate::pool::BufferPool;
 use std::cell::UnsafeCell;
 use std::fmt;
 use std::mem;
@@ -12,7 +11,6 @@ use winapi::um::minwinbase;
 #[repr(C)]
 pub(crate) struct Header {
     pub(crate) raw: UnsafeCell<minwinbase::OVERLAPPED>,
-    pub(crate) pool: BufferPool,
     /// Lock for the current overlapped operation.
     ///
     /// This can have one of three states:
@@ -31,11 +29,10 @@ pub(crate) struct Header {
 }
 
 impl Header {
-    pub(crate) fn new(max_buffer_size: usize) -> Self {
+    pub(crate) fn new() -> Self {
         Header {
             // Safety: OVERLAPPED structure is valid when zeroed.
             raw: unsafe { mem::MaybeUninit::zeroed().assume_init() },
-            pool: BufferPool::new(max_buffer_size),
             lock: AtomicI64::new(0),
             waker: AtomicWaker::new(),
         }

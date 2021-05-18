@@ -1,12 +1,13 @@
 //! Abstractions for building raw overlapping operation helpers.
 
+use crate::completion_port::CompletionPort;
 use crate::io::{Code, Overlapped, OverlappedResult};
-use crate::pool::BufferPool;
+use crate::pool::{BufferPool, SocketBuf, SocketPool};
 use crate::socket::ext::SocketExt as _;
 use crate::socket::{LockGuard, Socket};
-use crate::sys::AsRawSocket;
 use std::io;
-use std::os::windows::io::FromRawSocket;
+use std::os::windows::io::{AsRawSocket, FromRawSocket};
+use std::os::windows::raw::SOCKET;
 
 /// The lock code for accepting connections.
 pub const ACCEPT: Code = Code(0x7f_ff_ff_11);
@@ -20,7 +21,10 @@ pub enum OverlappedOutcome {
 }
 
 impl OverlappedOutcome {
-    pub(crate) fn apply_to<H>(self, guard: &LockGuard<'_, H>) {
+    pub(crate) fn apply_to<S>(self, guard: &mut LockGuard<'_, S>)
+    where
+        S: AsRawSocket,
+    {
         match self {
             Self::None => (),
             Self::Advance(n) => {
@@ -50,14 +54,17 @@ pub unsafe trait Operation<H> {
         &mut self,
         handle: &mut H,
         overlapped: &mut Overlapped,
-        pool: &BufferPool,
+        pool: &mut BufferPool,
+        sockets: &mut SocketPool,
     ) -> io::Result<()>;
 
     /// Collect the overlapped result into the output of the I/O operation.
     fn collect(
         &mut self,
         result: OverlappedResult,
-        pool: &BufferPool,
+        port: &CompletionPort,
+        pool: &mut BufferPool,
+        sockets: &mut SocketPool,
     ) -> io::Result<(Self::Output, OverlappedOutcome)>;
 }
 
@@ -81,9 +88,10 @@ where
         &mut self,
         socket: &mut S,
         overlapped: &mut Overlapped,
-        pool: &BufferPool,
+        pool: &mut BufferPool,
+        sockets: &mut SocketPool,
     ) -> io::Result<()> {
-        let mut accept = pool.take_socket_buf();
+        let mut accept = sockets.take()?;
         let mut output_buf = pool.take(128);
         socket.accept(&mut accept, &mut output_buf, 16, 16, overlapped)?;
         Ok(())
@@ -92,10 +100,13 @@ where
     fn collect(
         &mut self,
         result: OverlappedResult,
-        pool: &BufferPool,
+        port: &CompletionPort,
+        pool: &mut BufferPool,
+        sockets: &mut SocketPool,
     ) -> io::Result<(Self::Output, OverlappedOutcome)> {
-        let accept = pool.release_socket_buf();
-        let socket = todo!();
+        let SocketBuf(accept) = sockets.release();
+        let socket = unsafe { S::from_raw_socket(accept as SOCKET) };
+        let socket = Socket::new(socket, port.clone(), pool.max_buffer_size())?;
         Ok((socket, OverlappedOutcome::None))
     }
 }
