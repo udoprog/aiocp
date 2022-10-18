@@ -3,10 +3,18 @@ name = "iocp"
 version = "0.1.0"
 authors = ["John-John Tedro <udoprog@tedro.se>"]
 edition = "2018"
+description = "Simple and experimental asynchronous IOCP driver fow Windows."
+documentation = "https://docs.rs/iocp"
+readme = "README.md"
+homepage = "https://github.com/udoprog/aiocp"
+repository = "https://github.com/udoprog/aiocp"
+license = "MIT/Apache-2.0"
+keywords = ["iocp", "async"]
+categories = ["iocp"]
 resolver = "2"
 
 [features] 
-default = []
+default = ["background"]
 background = []
 
 [dependencies]

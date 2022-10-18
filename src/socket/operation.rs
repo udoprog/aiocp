@@ -99,7 +99,7 @@ where
 
     fn collect(
         &mut self,
-        result: OverlappedResult,
+        _result: OverlappedResult,
         port: &CompletionPort,
         pool: &mut BufferPool,
         sockets: &mut SocketPool,
