@@ -486,6 +486,13 @@ impl CreatePipeOptions {
     }
 }
 
+impl Default for CreatePipeOptions {
+    #[inline]
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Encode an address so that it is a null-terminated wide string.
 fn encode_addr(addr: impl AsRef<OsStr>) -> Box<[u16]> {
     addr.as_ref().encode_wide().chain(Some(0)).collect()

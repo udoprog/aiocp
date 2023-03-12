@@ -34,7 +34,7 @@ async fn main() -> io::Result<()> {
     });
 
     let (server, client) = tokio::try_join!(server, client)?;
-    let () = server?;
+    server?;
     let buf = client?;
 
     assert_eq!(&buf[..], b"ping");

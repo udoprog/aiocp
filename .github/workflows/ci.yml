@@ -16,7 +16,7 @@ jobs:
     - run: cargo test --workspace --doc
 
   clippy:
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     steps:
     - uses: actions/checkout@v3
     - uses: dtolnay/rust-toolchain@1.68
@@ -25,7 +25,7 @@ jobs:
     - run: cargo clippy --workspace --all-features --all-targets -- -D warnings
 
   rustfmt:
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     steps:
     - uses: actions/checkout@v3
     - uses: dtolnay/rust-toolchain@stable

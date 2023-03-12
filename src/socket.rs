@@ -113,16 +113,6 @@ where
         self.run_operation(operation::Accept::new()).await
     }
 
-    /// Access a reference to the underlying socket.
-    pub fn as_ref(&self) -> &S {
-        &self.socket
-    }
-
-    /// Access a mutable reference to the underlying socket.
-    pub fn as_mut(&mut self) -> &mut S {
-        &mut self.socket
-    }
-
     /// Register a new waker.
     pub(crate) fn register_by_ref(&self, waker: &Waker) {
         self.header.register_by_ref(waker);
@@ -179,6 +169,26 @@ where
                 self.header.as_raw_overlapped(),
             );
         }
+    }
+}
+
+/// Access a reference to the underlying socket.
+impl<S> AsRef<S> for Socket<S>
+where
+    S: AsRawSocket,
+{
+    fn as_ref(&self) -> &S {
+        &self.socket
+    }
+}
+
+/// Access a mutable reference to the underlying socket.
+impl<S> AsMut<S> for Socket<S>
+where
+    S: AsRawSocket,
+{
+    fn as_mut(&mut self) -> &mut S {
+        &mut self.socket
     }
 }
 
@@ -267,12 +277,8 @@ where
                     }
                     OverlappedState::Pending => {
                         let result = guard.result()?;
-                        let (output, outcome) = op.collect(
-                            result,
-                            guard.permit.port,
-                            &mut guard.pool,
-                            &mut guard.sockets,
-                        )?;
+                        let (output, outcome) =
+                            op.collect(result, guard.permit.port, guard.pool, guard.sockets)?;
                         outcome.apply_to(&mut guard);
                         output
                     }

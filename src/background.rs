@@ -1,7 +1,8 @@
-use crate::completion_port::{CompletionOutcome, CompletionPoll, CompletionPort};
 use std::io;
 use std::sync::Arc;
 use std::thread;
+
+use crate::completion_port::{CompletionOutcome, CompletionPoll, CompletionPort};
 
 /// A handle to the background thread.
 #[derive(Debug)]
@@ -29,7 +30,7 @@ pub fn setup(threads: u32) -> io::Result<(Arc<CompletionPort>, BackgroundThread)
     let handle2 = handle.clone();
 
     let thread = std::thread::spawn(move || {
-        let pending = loop {
+        let mut pending = loop {
             match handle2.poll()? {
                 CompletionPoll::Status(status) => match status.outcome {
                     CompletionOutcome::Aborted => {
@@ -50,6 +51,7 @@ pub fn setup(threads: u32) -> io::Result<(Arc<CompletionPort>, BackgroundThread)
         while pending > 0 {
             let status = handle2.poll_during_shutdown()?;
             status.release();
+            pending -= 1;
         }
 
         Ok::<_, io::Error>(())

@@ -81,13 +81,13 @@ impl Header {
     pub(crate) fn header_lock(&self, Code(id): Code) -> LockResult {
         let id = id as i64 + 1; // to ensure that we never use 0
 
-        let state = loop {
+        let state = 'out: {
             let op = self
                 .lock
                 .compare_exchange_weak(0, id, Ordering::SeqCst, Ordering::Relaxed);
 
             let n = match op {
-                Ok(..) => break OverlappedState::Idle,
+                Ok(..) => break 'out OverlappedState::Idle,
                 Err(n) => n,
             };
 
@@ -110,7 +110,7 @@ impl Header {
             //
             // If we were to just complete the operation, we would use the
             // incorrect contract for it.
-            break if id == -n {
+            break 'out if id == -n {
                 OverlappedState::Pending
             } else {
                 OverlappedState::Idle

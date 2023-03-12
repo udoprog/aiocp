@@ -108,16 +108,6 @@ where
         }
     }
 
-    /// Access a reference to the underlying handle.
-    pub fn as_ref(&self) -> &H {
-        &self.handle
-    }
-
-    /// Access a mutable reference to the underlying handle.
-    pub fn as_mut(&mut self) -> &mut H {
-        &mut self.handle
-    }
-
     /// Register a new waker.
     pub(crate) fn register_by_ref(&self, waker: &Waker) {
         self.header.register_by_ref(waker);
@@ -282,6 +272,26 @@ where
                 Poll::Ready(Ok(result.bytes_transferred))
             }
         }
+    }
+}
+
+/// Access a reference to the underlying handle.
+impl<H> AsRef<H> for Handle<H>
+where
+    H: AsRawHandle,
+{
+    fn as_ref(&self) -> &H {
+        &self.handle
+    }
+}
+
+/// Access a mutable reference to the underlying handle.
+impl<H> AsMut<H> for Handle<H>
+where
+    H: AsRawHandle,
+{
+    fn as_mut(&mut self) -> &mut H {
+        &mut self.handle
     }
 }
 
@@ -482,7 +492,7 @@ impl<H> LockGuard<'_, H> {
             as *const minwinbase::OVERLAPPED
             as *mut _);
 
-        (&*self.pool, overlapped, &mut *self.handle)
+        (self.pool, overlapped, &mut *self.handle)
     }
 
     /// Get the state of the guard.
@@ -492,7 +502,7 @@ impl<H> LockGuard<'_, H> {
 
     /// Access the pool associated with the locked state of the header.
     pub fn pool(&self) -> &BufferPool {
-        &*self.pool
+        self.pool
     }
 
     /// Advance the cursor of the overlapped structure by `amount`.

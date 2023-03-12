@@ -77,7 +77,7 @@ impl SocketPool {
     /// Clear all sockets between released to taken.
     pub(crate) fn clear(&mut self) {
         for socket in &self.sockets[self.released..self.taken] {
-            let _ = unsafe {
+            unsafe {
                 winsock2::closesocket(*socket);
             };
         }
