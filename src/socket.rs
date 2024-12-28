@@ -250,7 +250,7 @@ where
     }
 }
 
-impl<'a, S, O> Future for RunOperation<'a, S, O>
+impl<S, O> Future for RunOperation<'_, S, O>
 where
     S: AsRawSocket,
     O: Operation<S>,
@@ -315,7 +315,7 @@ where
     permit: CompletionPortPermit<'a>,
 }
 
-impl<'a, S> LockGuard<'a, S>
+impl<S> LockGuard<'_, S>
 where
     S: AsRawSocket,
 {

@@ -131,7 +131,6 @@ impl CompletionPort {
     /// Register the given socket for overlapped I/O and allocate buffers with
     /// the specified capacities that can be used inside of an operation with
     /// it.
-
     pub fn register_socket<S>(&self, socket: S, options: RegisterOptions) -> io::Result<Socket<S>>
     where
         S: AsRawSocket,

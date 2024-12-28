@@ -353,7 +353,7 @@ where
     }
 }
 
-impl<'a, H, O> Future for RunOperation<'a, H, O>
+impl<H, O> Future for RunOperation<'_, H, O>
 where
     H: AsRawHandle,
     O: Operation<H>,
@@ -449,7 +449,7 @@ pub(crate) struct LockGuard<'a, H> {
     _permit: CompletionPortPermit<'a>,
 }
 
-impl<'a, H> LockGuard<'a, H>
+impl<H> LockGuard<'_, H>
 where
     H: AsRawHandle,
 {
