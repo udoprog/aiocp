@@ -385,7 +385,7 @@ where
         unsafe {
             let overlapped = &mut *self.header.raw.get();
             let s = overlapped.u.s_mut();
-            let mut n = s.Offset as u64 | (s.OffsetHigh as u64) << 32;
+            let mut n = (s.Offset as u64) | ((s.OffsetHigh as u64) << 32);
 
             n = u64::try_from(amount)
                 .ok()
