@@ -17,9 +17,9 @@ pub(crate) struct Header {
     ///
     /// * `0`   -   Which is the open state.
     /// * `n > 0` - Which indicates that an overlapped task with a corresponding
-    ///             [Code] has been submitted and is being processed.
+    ///   [Code] has been submitted and is being processed.
     /// * `n < 0` - Which indicates that an overlapped task with a [Code]
-    ///             corresponding to `-n` has completed.
+    ///   corresponding to `-n` has completed.
     ///
     /// The task of the [lock] function is to find the lock in the open state -
     /// or try and work a lock which is in the negative state atomically into
