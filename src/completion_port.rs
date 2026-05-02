@@ -88,10 +88,7 @@ impl CompletionPort {
         let _pending = self.inner.pending.fetch_sub(1, Ordering::SeqCst);
         trace!(pending = _pending, "releasing failed permit");
 
-        Err(io::Error::new(
-            io::ErrorKind::Other,
-            "port is shutting down",
-        ))
+        Err(io::Error::other("port is shutting down"))
     }
 
     /// Register the given handle for overlapped I/O and allocate buffers with
@@ -102,10 +99,7 @@ impl CompletionPort {
         H: AsRawHandle,
     {
         if options.key >= RESERVED_PORTS {
-            return Err(io::Error::new(
-                io::ErrorKind::Other,
-                "trying to use reserved completion port",
-            ));
+            return Err(io::Error::other("trying to use reserved completion port"));
         }
 
         // Safety: there's nothing inherently unsafe about this.
@@ -133,10 +127,7 @@ impl CompletionPort {
         S: AsRawSocket,
     {
         if options.key >= RESERVED_PORTS {
-            return Err(io::Error::new(
-                io::ErrorKind::Other,
-                "trying to use reserved completion port",
-            ));
+            return Err(io::Error::other("trying to use reserved completion port"));
         }
 
         // Safety: there's nothing inherently unsafe about this.
@@ -193,12 +184,7 @@ impl CompletionPort {
                     let pending = pending as usize;
                     return Ok(CompletionPoll::Shutdown(Shutdown { pending }));
                 }
-                _ => {
-                    return Err(io::Error::new(
-                        io::ErrorKind::Other,
-                        "got status for reserved completion port",
-                    ))
-                }
+                _ => return Err(io::Error::other("got status for reserved completion port")),
             }
         }
 
@@ -226,12 +212,7 @@ impl CompletionPort {
                 match status.completion_key {
                     // shutdown called again.
                     SHUTDOWN_PORT => continue,
-                    _ => {
-                        return Err(io::Error::new(
-                            io::ErrorKind::Other,
-                            "got status for reserved completion port",
-                        ))
-                    }
+                    _ => return Err(io::Error::other("got status for reserved completion port")),
                 }
             }
 

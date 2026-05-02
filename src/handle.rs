@@ -388,10 +388,7 @@ where
                 output
             }
             State::Complete => {
-                return Poll::Ready(Err(io::Error::new(
-                    io::ErrorKind::Other,
-                    "polled after completion",
-                )))
+                return Poll::Ready(Err(io::Error::other("polled after completion")))
             }
         };
 

@@ -15,10 +15,7 @@ impl BackgroundThread {
     pub fn join(self) -> io::Result<()> {
         match self.thread.join() {
             Ok(result) => result,
-            Err(..) => Err(io::Error::new(
-                io::ErrorKind::Other,
-                "background thread panicked",
-            )),
+            Err(..) => Err(io::Error::other("background thread panicked")),
         }
     }
 }
