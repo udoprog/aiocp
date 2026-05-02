@@ -47,16 +47,16 @@ pub enum PipeMode {
     /// Data is written to the pipe as a stream of bytes. The pipe does not
     /// distinguish bytes written during different write operations.
     ///
-    /// Corresponds to [PIPE_TYPE_BYTE][winapi::um::winbase::PIPE_TYPE_BYTE].
+    /// Corresponds to [PIPE_TYPE_BYTE].
     Byte,
     /// Data is written to the pipe as a stream of messages. The pipe treats the
     /// bytes written during each write operation as a message unit. Any reading
     /// function on [NamedPipe] returns [ERROR_MORE_DATA] when a message is not
     /// read completely.
     ///
-    /// Corresponds to [PIPE_TYPE_MESSAGE][winapi::um::winbase::PIPE_TYPE_MESSAGE].
+    /// Corresponds to [PIPE_TYPE_MESSAGE].
     ///
-    /// [ERROR_MORE_DATA]: winapi::shared::winerror::ERROR_MORE_DATA
+    /// [ERROR_MORE_DATA]: windows_sys::Win32::Foundation::ERROR_MORE_DATA
     Message,
 }
 
@@ -309,7 +309,7 @@ impl CreatePipeOptions {
     ///
     /// This corresponds to setting [FILE_FLAG_FIRST_PIPE_INSTANCE].
     ///
-    /// [ERROR_ACCESS_DENIED]: winapi::shared::winerror::ERROR_ACCESS_DENIED
+    /// [ERROR_ACCESS_DENIED]: windows_sys::Win32::Foundation::ERROR_ACCESS_DENIED
     /// [FILE_FLAG_FIRST_PIPE_INSTANCE]: https://docs.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-createnamedpipea#pipe_first_pipe_instance
     ///
     /// # Examples
@@ -358,7 +358,6 @@ impl CreatePipeOptions {
     /// This corresponds to specifying [nMaxInstances].
     ///
     /// [nMaxInstances]: https://docs.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-createnamedpipea
-    /// [PIPE_UNLIMITED_INSTANCES]: winapi::um::winbase::PIPE_UNLIMITED_INSTANCES
     ///
     /// # Panics
     ///
@@ -459,7 +458,7 @@ impl CreatePipeOptions {
     /// The caller must ensure that `attrs` points to an initialized instance of
     /// a [SECURITY_ATTRIBUTES] structure.
     ///
-    /// [SECURITY_ATTRIBUTES]: [winapi::um::minwinbase::SECURITY_ATTRIBUTES]
+    /// [SECURITY_ATTRIBUTES]: windows_sys::Win32::Security::SECURITY_ATTRIBUTES
     pub unsafe fn create_with_security_attributes(
         &self,
         addr: impl AsRef<OsStr>,
@@ -475,7 +474,7 @@ impl CreatePipeOptions {
             self.out_buffer_size,
             self.in_buffer_size,
             self.default_timeout,
-            attrs as *mut _,
+            attrs.cast(),
         );
 
         if handle == INVALID_HANDLE_VALUE {
