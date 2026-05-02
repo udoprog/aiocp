@@ -1,28 +1,31 @@
 use std::io;
 use std::ptr;
 use std::sync::Arc;
-use winapi::um::winsock2;
+
+use windows_sys::Win32::Networking::WinSock::{
+    closesocket, WSASocketW, INVALID_SOCKET, SOCKET, WSAPROTOCOL_INFOW, WSA_FLAG_OVERLAPPED,
+};
 
 /// A pointer to the buffer for a socket to receive.
-pub struct SocketBuf(pub(crate) winsock2::SOCKET);
+pub struct SocketBuf(pub(crate) SOCKET);
 
 impl SocketBuf {
     /// Access the underlying pointer.
-    pub fn as_raw_socket(&mut self) -> winsock2::SOCKET {
+    pub fn as_raw_socket(&mut self) -> SOCKET {
         self.0
     }
 }
 
 pub struct SocketPool {
-    sockets: Vec<winsock2::SOCKET>,
+    sockets: Vec<SOCKET>,
     taken: usize,
     released: usize,
-    info: Arc<winsock2::WSAPROTOCOL_INFOW>,
+    info: Arc<WSAPROTOCOL_INFOW>,
 }
 
 impl SocketPool {
     /// Construct a new socket pool.
-    pub(crate) fn new(info: Arc<winsock2::WSAPROTOCOL_INFOW>) -> Self {
+    pub(crate) fn new(info: Arc<WSAPROTOCOL_INFOW>) -> Self {
         Self {
             sockets: Vec::new(),
             taken: 0,
@@ -32,23 +35,23 @@ impl SocketPool {
     }
 
     /// Copy the info associated with this pool.
-    pub(crate) fn info(&self) -> Arc<winsock2::WSAPROTOCOL_INFOW> {
+    pub(crate) fn info(&self) -> Arc<WSAPROTOCOL_INFOW> {
         self.info.clone()
     }
 
     /// Construct a new socket.
-    fn new_socket(&self) -> io::Result<winsock2::SOCKET> {
+    fn new_socket(&self) -> io::Result<SOCKET> {
         unsafe {
-            let result = winsock2::WSASocketW(
+            let result = WSASocketW(
                 self.info.iAddressFamily,
                 self.info.iSocketType,
                 self.info.iProtocol,
                 ptr::null_mut(),
                 0,
-                winsock2::WSA_FLAG_OVERLAPPED,
+                WSA_FLAG_OVERLAPPED,
             );
 
-            if result == winsock2::INVALID_SOCKET {
+            if result == INVALID_SOCKET {
                 return Err(io::Error::last_os_error());
             }
 
@@ -78,7 +81,7 @@ impl SocketPool {
     pub(crate) fn clear(&mut self) {
         for socket in &self.sockets[self.released..self.taken] {
             unsafe {
-                winsock2::closesocket(*socket);
+                closesocket(*socket);
             };
         }
 

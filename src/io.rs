@@ -1,6 +1,8 @@
-use crate::task::Header;
 use std::io;
-use winapi::um::minwinbase;
+
+use windows_sys::Win32::System::IO::OVERLAPPED;
+
+use crate::task::Header;
 
 /// A unique code that designates exactly how any one given overlapped result
 /// must be treated. This has safety implications, because treating the
@@ -42,17 +44,17 @@ pub enum OverlappedState {
 /// An overlapped structure.
 #[derive(Debug)]
 pub struct Overlapped {
-    raw: *mut minwinbase::OVERLAPPED,
+    raw: *mut OVERLAPPED,
 }
 
 impl Overlapped {
     /// Convert from a raw pointer.
-    pub(crate) fn from_raw(raw: *mut minwinbase::OVERLAPPED) -> Self {
+    pub(crate) fn from_raw(raw: *mut OVERLAPPED) -> Self {
         Self { raw }
     }
 
     /// Access a pointer to the underlying overlapped struct.
-    pub(crate) fn as_ptr(&mut self) -> *mut minwinbase::OVERLAPPED {
+    pub(crate) fn as_ptr(&mut self) -> *mut OVERLAPPED {
         self.raw
     }
 }

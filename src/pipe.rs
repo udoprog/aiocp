@@ -3,11 +3,15 @@ use std::io;
 use std::os::windows::ffi::OsStrExt as _;
 use std::os::windows::io::{AsRawHandle, RawHandle};
 use std::ptr;
-use winapi::shared::minwindef::DWORD;
-use winapi::um::handleapi;
-use winapi::um::namedpipeapi;
-use winapi::um::winbase;
-use winapi::um::winnt::HANDLE;
+
+use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, INVALID_HANDLE_VALUE};
+use windows_sys::Win32::Storage::FileSystem::{
+    FILE_FLAG_FIRST_PIPE_INSTANCE, PIPE_ACCESS_DUPLEX, PIPE_ACCESS_INBOUND, PIPE_ACCESS_OUTBOUND,
+};
+use windows_sys::Win32::System::Pipes::{
+    CreateNamedPipeW, PIPE_REJECT_REMOTE_CLIENTS, PIPE_TYPE_BYTE, PIPE_TYPE_MESSAGE,
+    PIPE_UNLIMITED_INSTANCES,
+};
 
 /// A named pipe as created through [CreateNamedPipe].
 #[derive(Debug)]
@@ -23,7 +27,7 @@ impl Drop for NamedPipe {
     fn drop(&mut self) {
         unsafe {
             // NB: intentionally ignored.
-            let _ = handleapi::CloseHandle(self.handle);
+            let _ = CloseHandle(self.handle);
         }
     }
 }
@@ -76,12 +80,12 @@ macro_rules! bool_flag {
 /// See [CreatePipeOptions::create].
 #[derive(Debug, Clone)]
 pub struct CreatePipeOptions {
-    open_mode: DWORD,
-    pipe_mode: DWORD,
-    max_instances: DWORD,
-    out_buffer_size: DWORD,
-    in_buffer_size: DWORD,
-    default_timeout: DWORD,
+    open_mode: u32,
+    pipe_mode: u32,
+    max_instances: u32,
+    out_buffer_size: u32,
+    in_buffer_size: u32,
+    default_timeout: u32,
     custom_flags: u32,
 }
 
@@ -99,9 +103,9 @@ impl CreatePipeOptions {
     /// ```
     pub fn new() -> CreatePipeOptions {
         CreatePipeOptions {
-            open_mode: winbase::PIPE_ACCESS_DUPLEX,
-            pipe_mode: winbase::PIPE_TYPE_BYTE | winbase::PIPE_REJECT_REMOTE_CLIENTS,
-            max_instances: winbase::PIPE_UNLIMITED_INSTANCES,
+            open_mode: PIPE_ACCESS_DUPLEX,
+            pipe_mode: PIPE_TYPE_BYTE | PIPE_REJECT_REMOTE_CLIENTS,
+            max_instances: PIPE_UNLIMITED_INSTANCES,
             out_buffer_size: 65536,
             in_buffer_size: 65536,
             default_timeout: 0,
@@ -119,8 +123,8 @@ impl CreatePipeOptions {
     /// [dwPipeMode]: https://docs.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-createnamedpipea
     pub fn pipe_mode(&mut self, pipe_mode: PipeMode) -> &mut Self {
         self.pipe_mode = match pipe_mode {
-            PipeMode::Byte => winbase::PIPE_TYPE_BYTE,
-            PipeMode::Message => winbase::PIPE_TYPE_MESSAGE,
+            PipeMode::Byte => PIPE_TYPE_BYTE,
+            PipeMode::Message => PIPE_TYPE_MESSAGE,
         };
 
         self
@@ -208,7 +212,7 @@ impl CreatePipeOptions {
     /// # Ok(()) }
     /// ```
     pub fn access_inbound(&mut self, allowed: bool) -> &mut Self {
-        bool_flag!(self.open_mode, allowed, winbase::PIPE_ACCESS_INBOUND);
+        bool_flag!(self.open_mode, allowed, PIPE_ACCESS_INBOUND);
         self
     }
 
@@ -295,7 +299,7 @@ impl CreatePipeOptions {
     /// # Ok(()) }
     /// ```
     pub fn access_outbound(&mut self, allowed: bool) -> &mut Self {
-        bool_flag!(self.open_mode, allowed, winbase::PIPE_ACCESS_OUTBOUND);
+        bool_flag!(self.open_mode, allowed, PIPE_ACCESS_OUTBOUND);
         self
     }
 
@@ -331,11 +335,7 @@ impl CreatePipeOptions {
     /// # Ok(()) }
     /// ```
     pub fn first_pipe_instance(&mut self, first: bool) -> &mut Self {
-        bool_flag!(
-            self.open_mode,
-            first,
-            winbase::FILE_FLAG_FIRST_PIPE_INSTANCE
-        );
+        bool_flag!(self.open_mode, first, FILE_FLAG_FIRST_PIPE_INSTANCE);
         self
     }
 
@@ -346,7 +346,7 @@ impl CreatePipeOptions {
     ///
     /// [PIPE_REJECT_REMOTE_CLIENTS]: https://docs.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-createnamedpipea#pipe_reject_remote_clients
     pub fn reject_remote_clients(&mut self, reject: bool) -> &mut Self {
-        bool_flag!(self.pipe_mode, reject, winbase::PIPE_REJECT_REMOTE_CLIENTS);
+        bool_flag!(self.pipe_mode, reject, PIPE_REJECT_REMOTE_CLIENTS);
         self
     }
 
@@ -372,9 +372,9 @@ impl CreatePipeOptions {
     /// let builder = CreatePipeOptions::new().max_instances(255);
     /// # Ok(()) }
     /// ```
-    pub fn max_instances(&mut self, instances: usize) -> &mut Self {
+    pub fn max_instances(&mut self, instances: u32) -> &mut Self {
         assert!(instances < 255, "cannot specify more than 254 instances");
-        self.max_instances = instances as DWORD;
+        self.max_instances = instances;
         self
     }
 
@@ -384,7 +384,7 @@ impl CreatePipeOptions {
     ///
     /// [nOutBufferSize]: https://docs.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-createnamedpipea
     pub fn out_buffer_size(&mut self, buffer: u32) -> &mut Self {
-        self.out_buffer_size = buffer as DWORD;
+        self.out_buffer_size = buffer;
         self
     }
 
@@ -394,7 +394,7 @@ impl CreatePipeOptions {
     ///
     /// [nInBufferSize]: https://docs.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-createnamedpipea
     pub fn in_buffer_size(&mut self, buffer: u32) -> &mut Self {
-        self.in_buffer_size = buffer as DWORD;
+        self.in_buffer_size = buffer;
         self
     }
 
@@ -467,7 +467,7 @@ impl CreatePipeOptions {
     ) -> io::Result<NamedPipe> {
         let addr = encode_addr(addr);
 
-        let handle = namedpipeapi::CreateNamedPipeW(
+        let handle = CreateNamedPipeW(
             addr.as_ptr(),
             self.custom_flags | self.open_mode,
             self.pipe_mode,
@@ -478,7 +478,7 @@ impl CreatePipeOptions {
             attrs as *mut _,
         );
 
-        if handle == handleapi::INVALID_HANDLE_VALUE {
+        if handle == INVALID_HANDLE_VALUE {
             return Err(io::Error::last_os_error());
         }
 

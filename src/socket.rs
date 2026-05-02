@@ -1,7 +1,3 @@
-use crate::completion_port::{CompletionPort, CompletionPortPermit};
-use crate::io::{Code, Overlapped, OverlappedResult, OverlappedState};
-use crate::pool::{BufferPool, SocketPool};
-use crate::task::{Header, LockResult};
 use std::convert::TryFrom as _;
 use std::fmt;
 use std::future::Future;
@@ -11,13 +7,16 @@ use std::os::windows::io::{AsRawSocket, FromRawSocket};
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll, Waker};
-use winapi::shared::minwindef::FALSE;
-use winapi::shared::winerror;
-use winapi::um::errhandlingapi;
-use winapi::um::ioapiset;
-use winapi::um::minwinbase;
-use winapi::um::processthreadsapi;
-use winapi::um::winsock2;
+
+use windows_sys::Win32::Foundation::{GetLastError, ERROR_BROKEN_PIPE, ERROR_HANDLE_EOF, FALSE};
+use windows_sys::Win32::Networking::WinSock::{WSADuplicateSocketW, SOCKET};
+use windows_sys::Win32::System::Threading::GetCurrentProcessId;
+use windows_sys::Win32::System::IO::{CancelIoEx, GetOverlappedResult, OVERLAPPED};
+
+use crate::completion_port::{CompletionPort, CompletionPortPermit};
+use crate::io::{Code, Overlapped, OverlappedResult, OverlappedState};
+use crate::pool::{BufferPool, SocketPool};
+use crate::task::{Header, LockResult};
 
 mod operation;
 use self::operation::Operation;
@@ -45,9 +44,9 @@ where
         let info = unsafe {
             let mut info = mem::MaybeUninit::uninit();
 
-            let result = winsock2::WSADuplicateSocketW(
-                socket.as_raw_socket() as winsock2::SOCKET,
-                processthreadsapi::GetCurrentProcessId(),
+            let result = WSADuplicateSocketW(
+                socket.as_raw_socket() as SOCKET,
+                GetCurrentProcessId(),
                 info.as_mut_ptr(),
             );
 
@@ -164,7 +163,7 @@ where
         // pointer and the local handle are guaranteed to be alive for the
         // duration of this object.
         unsafe {
-            let _ = ioapiset::CancelIoEx(
+            let _ = CancelIoEx(
                 self.socket.as_raw_socket() as *mut _,
                 self.header.as_raw_overlapped(),
             );
@@ -326,7 +325,7 @@ where
         unsafe {
             let mut bytes_transferred = mem::MaybeUninit::zeroed();
 
-            let result = ioapiset::GetOverlappedResult(
+            let result = GetOverlappedResult(
                 self.socket.as_raw_socket() as *mut _,
                 self.header.as_raw_overlapped(),
                 bytes_transferred.as_mut_ptr(),
@@ -334,9 +333,9 @@ where
             );
 
             if result == FALSE {
-                return match errhandlingapi::GetLastError() {
-                    winerror::ERROR_HANDLE_EOF => Ok(OverlappedResult::empty()),
-                    winerror::ERROR_BROKEN_PIPE => Ok(OverlappedResult::empty()),
+                return match GetLastError() {
+                    ERROR_HANDLE_EOF => Ok(OverlappedResult::empty()),
+                    ERROR_BROKEN_PIPE => Ok(OverlappedResult::empty()),
                     other => Err(io::Error::from_raw_os_error(other as i32)),
                 };
             }
@@ -355,9 +354,8 @@ where
 {
     /// Prepare the information.
     pub fn prepare(&mut self) -> (&mut BufferPool, &mut SocketPool, Overlapped, &mut S) {
-        let overlapped = Overlapped::from_raw(Arc::into_raw(self.header.clone())
-            as *const minwinbase::OVERLAPPED
-            as *mut _);
+        let overlapped =
+            Overlapped::from_raw(Arc::into_raw(self.header.clone()) as *const OVERLAPPED as *mut _);
 
         (
             &mut self.pool,
@@ -384,7 +382,7 @@ where
         // Safety: this is done in the guard, which ensures exclusive access.
         unsafe {
             let overlapped = &mut *self.header.raw.get();
-            let s = overlapped.u.s_mut();
+            let s = &mut overlapped.Anonymous.Anonymous;
             let mut n = (s.Offset as u64) | ((s.OffsetHigh as u64) << 32);
 
             n = u64::try_from(amount)

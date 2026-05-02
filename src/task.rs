@@ -1,16 +1,18 @@
-use crate::atomic_waker::AtomicWaker;
-use crate::io::{Code, OverlappedState};
 use std::cell::UnsafeCell;
 use std::fmt;
 use std::mem;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
 use std::task::Waker;
-use winapi::um::minwinbase;
+
+use windows_sys::Win32::System::IO::OVERLAPPED;
+
+use crate::atomic_waker::AtomicWaker;
+use crate::io::{Code, OverlappedState};
 
 #[repr(C)]
 pub(crate) struct Header {
-    pub(crate) raw: UnsafeCell<minwinbase::OVERLAPPED>,
+    pub(crate) raw: UnsafeCell<OVERLAPPED>,
     /// Lock for the current overlapped operation.
     ///
     /// This can have one of three states:
@@ -44,7 +46,7 @@ impl Header {
     }
 
     /// Raw access to the underlying file handle.
-    pub(crate) fn as_raw_overlapped(&self) -> *mut minwinbase::OVERLAPPED {
+    pub(crate) fn as_raw_overlapped(&self) -> *mut OVERLAPPED {
         self.raw.get()
     }
 
@@ -57,7 +59,7 @@ impl Header {
     /// to the first element in this header.
     ///
     /// Coercing *anything* else into this is just wrong.
-    pub(crate) unsafe fn from_overlapped(overlapped: *mut minwinbase::OVERLAPPED) -> Arc<Self> {
+    pub(crate) unsafe fn from_overlapped(overlapped: *mut OVERLAPPED) -> Arc<Self> {
         Arc::from_raw(overlapped as *const _ as *const Self)
     }
 

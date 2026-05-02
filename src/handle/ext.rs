@@ -1,14 +1,16 @@
-use crate::io::Overlapped;
 use std::convert::TryFrom as _;
 use std::io;
 use std::mem;
 use std::os::windows::io::AsRawHandle;
 use std::ptr;
+
 use tokio::io::ReadBuf;
-use winapi::shared::minwindef::{DWORD, FALSE};
-use winapi::um::fileapi;
-use winapi::um::ioapiset;
-use winapi::um::namedpipeapi;
+use windows_sys::Win32::Foundation::FALSE;
+use windows_sys::Win32::Storage::FileSystem::{ReadFile, WriteFile};
+use windows_sys::Win32::System::Pipes::ConnectNamedPipe;
+use windows_sys::Win32::System::IO::DeviceIoControl;
+
+use crate::io::Overlapped;
 
 /// Windows-specific trait for writing to a HANDLE.
 pub trait HandleExt {
@@ -48,7 +50,7 @@ where
         unsafe {
             let n = {
                 let buf = buf.unfilled_mut();
-                let len = DWORD::try_from(buf.len()).unwrap_or(DWORD::MAX);
+                let len = u32::try_from(buf.len()).unwrap_or(u32::MAX);
                 let mut n = mem::MaybeUninit::zeroed();
 
                 trace! {
@@ -57,7 +59,7 @@ where
                     "read_overlapped",
                 };
 
-                let result = fileapi::ReadFile(
+                let result = ReadFile(
                     self.as_raw_handle() as *mut _,
                     buf.as_mut_ptr() as *mut _,
                     len,
@@ -80,10 +82,10 @@ where
 
     fn write_overlapped(&mut self, buf: &[u8], overlapped: &mut Overlapped) -> io::Result<usize> {
         unsafe {
-            let len = DWORD::try_from(buf.len()).unwrap_or(DWORD::MAX);
+            let len = u32::try_from(buf.len()).unwrap_or(u32::MAX);
             let mut n = mem::MaybeUninit::zeroed();
 
-            let result = fileapi::WriteFile(
+            let result = WriteFile(
                 self.as_raw_handle() as *mut _,
                 buf.as_ptr() as *const _,
                 len,
@@ -101,8 +103,7 @@ where
 
     fn connect_overlapped(&mut self, overlapped: &mut Overlapped) -> io::Result<()> {
         unsafe {
-            let result =
-                namedpipeapi::ConnectNamedPipe(self.as_raw_handle() as *mut _, overlapped.as_ptr());
+            let result = ConnectNamedPipe(self.as_raw_handle() as *mut _, overlapped.as_ptr());
 
             if result == FALSE {
                 return Err(io::Error::last_os_error());
@@ -124,7 +125,7 @@ where
 
             let (in_buffer, in_buffer_len) = match in_buffer {
                 Some(buf) => {
-                    let len = DWORD::try_from(buf.len()).expect("input buffer oob");
+                    let len = u32::try_from(buf.len()).expect("input buffer oob");
                     (buf.as_ptr() as *const _ as *mut _, len)
                 }
                 None => (ptr::null_mut(), 0),
@@ -133,13 +134,13 @@ where
             let (out_buffer, out_buffer_len) = match out_buffer {
                 Some(buf) => {
                     let buf = buf.unfilled_mut();
-                    let len = DWORD::try_from(buf.len()).expect("input buffer oob");
+                    let len = u32::try_from(buf.len()).expect("input buffer oob");
                     (buf.as_mut_ptr() as *mut _, len)
                 }
                 None => (ptr::null_mut(), 0),
             };
 
-            let result = ioapiset::DeviceIoControl(
+            let result = DeviceIoControl(
                 self.as_raw_handle() as *mut _,
                 io_control_code,
                 in_buffer,

@@ -1,13 +1,14 @@
-use crate::io::Overlapped;
-use crate::pool::SocketBuf;
 use std::convert::TryFrom as _;
 use std::io;
 use std::mem;
 use std::os::windows::io::AsRawSocket;
+
 use tokio::io::ReadBuf;
-use winapi::shared::minwindef::{DWORD, FALSE};
-use winapi::um::mswsock;
-use winapi::um::winsock2;
+use windows_sys::Win32::Foundation::FALSE;
+use windows_sys::Win32::Networking::WinSock::{AcceptEx, SOCKET};
+
+use crate::io::Overlapped;
+use crate::pool::SocketBuf;
 
 /// Windows-specific trait for writing to a HANDLE.
 pub trait SocketExt {
@@ -37,15 +38,15 @@ where
     ) -> io::Result<usize> {
         unsafe {
             let output_buf = output_buf.unfilled_mut();
-            let output_buf_len = DWORD::try_from(output_buf.len()).expect("output buffer oob");
+            let output_buf_len = u32::try_from(output_buf.len()).expect("output buffer oob");
             let local_address_len =
-                DWORD::try_from(local_address_len).expect("local address length oob");
+                u32::try_from(local_address_len).expect("local address length oob");
             let remote_address_len =
-                DWORD::try_from(remote_address_len).expect("local address length oob");
+                u32::try_from(remote_address_len).expect("local address length oob");
             let mut n = mem::MaybeUninit::uninit();
 
-            let result = mswsock::AcceptEx(
-                self.as_raw_socket() as winsock2::SOCKET,
+            let result = AcceptEx(
+                self.as_raw_socket() as SOCKET,
                 accept.as_raw_socket(),
                 output_buf.as_mut_ptr() as *mut _,
                 output_buf_len,

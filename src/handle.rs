@@ -1,8 +1,3 @@
-use crate::completion_port::{CompletionPort, CompletionPortPermit};
-use crate::io::{Code, Overlapped, OverlappedResult, OverlappedState};
-use crate::ioctl;
-use crate::pool::BufferPool;
-use crate::task::{Header, LockResult};
 use std::convert::TryFrom as _;
 use std::fmt;
 use std::future::Future;
@@ -12,12 +7,16 @@ use std::os::windows::io::AsRawHandle;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll, Waker};
+
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
-use winapi::shared::minwindef::FALSE;
-use winapi::shared::winerror;
-use winapi::um::errhandlingapi;
-use winapi::um::ioapiset;
-use winapi::um::minwinbase;
+use windows_sys::Win32::Foundation::{GetLastError, ERROR_BROKEN_PIPE, ERROR_HANDLE_EOF, FALSE};
+use windows_sys::Win32::System::IO::{CancelIoEx, GetOverlappedResult, OVERLAPPED};
+
+use crate::completion_port::{CompletionPort, CompletionPortPermit};
+use crate::io::{Code, Overlapped, OverlappedResult, OverlappedState};
+use crate::ioctl;
+use crate::pool::BufferPool;
+use crate::task::{Header, LockResult};
 
 mod operation;
 use self::operation::Operation;
@@ -158,7 +157,7 @@ where
         // pointer and the local handle are guaranteed to be alive for the
         // duration of this object.
         unsafe {
-            let _ = ioapiset::CancelIoEx(
+            let _ = CancelIoEx(
                 self.handle.as_raw_handle() as *mut _,
                 self.header.as_raw_overlapped(),
             );
@@ -460,7 +459,7 @@ where
         unsafe {
             let mut bytes_transferred = mem::MaybeUninit::zeroed();
 
-            let result = ioapiset::GetOverlappedResult(
+            let result = GetOverlappedResult(
                 self.handle.as_raw_handle() as *mut _,
                 self.header.as_raw_overlapped(),
                 bytes_transferred.as_mut_ptr(),
@@ -468,9 +467,9 @@ where
             );
 
             if result == FALSE {
-                return match errhandlingapi::GetLastError() {
-                    winerror::ERROR_HANDLE_EOF => Ok(OverlappedResult::empty()),
-                    winerror::ERROR_BROKEN_PIPE => Ok(OverlappedResult::empty()),
+                return match GetLastError() {
+                    ERROR_HANDLE_EOF => Ok(OverlappedResult::empty()),
+                    ERROR_BROKEN_PIPE => Ok(OverlappedResult::empty()),
                     other => Err(io::Error::from_raw_os_error(other as i32)),
                 };
             }
@@ -488,9 +487,8 @@ impl<H> LockGuard<'_, H> {
     pub fn prepare(&mut self) -> (&BufferPool, Overlapped, &mut H) {
         self.pool.clear();
 
-        let overlapped = Overlapped::from_raw(Arc::into_raw(self.header.clone())
-            as *const minwinbase::OVERLAPPED
-            as *mut _);
+        let overlapped =
+            Overlapped::from_raw(Arc::into_raw(self.header.clone()) as *const OVERLAPPED as *mut _);
 
         (self.pool, overlapped, &mut *self.handle)
     }
@@ -517,7 +515,7 @@ impl<H> LockGuard<'_, H> {
         // Safety: this is done in the guard, which ensures exclusive access.
         unsafe {
             let overlapped = &mut *self.header.raw.get();
-            let s = overlapped.u.s_mut();
+            let s = &mut overlapped.Anonymous.Anonymous;
             let mut n = (s.Offset as u64) | ((s.OffsetHigh as u64) << 32);
 
             n = u64::try_from(amount)

@@ -4,7 +4,7 @@ version = "0.1.0"
 authors = ["John-John Tedro <udoprog@tedro.se>"]
 edition = "2018"
 rust-version = "1.70"
-description = "Simple and experimental asynchronous IOCP driver fow Windows."
+description = "Simple and experimental asynchronous IOCP driver for Windows."
 documentation = "https://docs.rs/iocp"
 readme = "README.md"
 homepage = "https://github.com/udoprog/aiocp"
@@ -24,17 +24,15 @@ futures = "0.3.28"
 tokio = "1.27"
 tracing = { version = "0.1.37", optional = true }
 
-[dependencies.winapi]
-version = "0.3.9"
+[dependencies.windows-sys]
+version = "0.61.2"
 features = [
-    "winnt",
-    "handleapi",
-    "ioapiset",
-    "minwinbase",
-    "winerror",
-    "namedpipeapi",
-    "errhandlingapi",
-    "mswsock",
+    "Win32_Networking_WinSock",
+    "Win32_System_Threading",
+    "Win32_System_IO",
+    "Win32_Storage_FileSystem",
+    "Win32_Security",
+    "Win32_System_Pipes",
 ]
 
 [dev-dependencies]

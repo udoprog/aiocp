@@ -1,6 +1,3 @@
-use crate::handle::Handle;
-use crate::socket::Socket;
-use crate::task::Header;
 use std::fmt;
 use std::io;
 use std::mem;
@@ -8,13 +5,18 @@ use std::os::windows::io::{AsRawHandle, AsRawSocket};
 use std::ptr;
 use std::sync::atomic::{AtomicIsize, Ordering};
 use std::sync::Arc;
-use winapi::shared::minwindef::FALSE;
-use winapi::shared::winerror;
-use winapi::um::errhandlingapi;
-use winapi::um::handleapi;
-use winapi::um::ioapiset;
-use winapi::um::winbase;
-use winapi::um::winnt::HANDLE;
+
+use windows_sys::Win32::Foundation::{
+    CloseHandle, GetLastError, ERROR_OPERATION_ABORTED, FALSE, HANDLE, INVALID_HANDLE_VALUE,
+};
+use windows_sys::Win32::System::Threading::INFINITE;
+use windows_sys::Win32::System::IO::{
+    CreateIoCompletionPort, GetQueuedCompletionStatus, PostQueuedCompletionStatus,
+};
+
+use crate::handle::Handle;
+use crate::socket::Socket;
+use crate::task::Header;
 
 /// Default max buffer size in use.
 const DEFAULT_MAX_BUFFER_SIZE: usize = 1 << 16;
@@ -57,12 +59,7 @@ impl CompletionPort {
     /// Create a new completion port.
     pub fn create(threads: u32) -> io::Result<Self> {
         unsafe {
-            let handle = ioapiset::CreateIoCompletionPort(
-                handleapi::INVALID_HANDLE_VALUE,
-                ptr::null_mut(),
-                0,
-                threads,
-            );
+            let handle = CreateIoCompletionPort(INVALID_HANDLE_VALUE, ptr::null_mut(), 0, threads);
 
             if handle.is_null() {
                 return Err(io::Error::last_os_error());
@@ -113,7 +110,7 @@ impl CompletionPort {
 
         // Safety: there's nothing inherently unsafe about this.
         unsafe {
-            let handle = ioapiset::CreateIoCompletionPort(
+            let handle = CreateIoCompletionPort(
                 handle.as_raw_handle() as *mut _,
                 self.inner.handle,
                 options.key,
@@ -144,7 +141,7 @@ impl CompletionPort {
 
         // Safety: there's nothing inherently unsafe about this.
         unsafe {
-            let handle = ioapiset::CreateIoCompletionPort(
+            let handle = CreateIoCompletionPort(
                 socket.as_raw_socket() as *mut _,
                 self.inner.handle,
                 options.key,
@@ -162,7 +159,7 @@ impl CompletionPort {
     /// Post a message to the I/O completion port.
     pub fn post(&self, completion_port: usize, overlapped: *mut ()) -> io::Result<()> {
         unsafe {
-            let result = ioapiset::PostQueuedCompletionStatus(
+            let result = PostQueuedCompletionStatus(
                 self.inner.handle,
                 0,
                 completion_port,
@@ -266,19 +263,19 @@ impl CompletionPort {
             let mut completion_key = mem::MaybeUninit::zeroed();
             let mut overlapped = mem::MaybeUninit::zeroed();
 
-            let result = ioapiset::GetQueuedCompletionStatus(
+            let result = GetQueuedCompletionStatus(
                 self.inner.handle,
                 bytes_transferred.as_mut_ptr(),
                 completion_key.as_mut_ptr(),
                 overlapped.as_mut_ptr(),
-                winbase::INFINITE,
+                INFINITE,
             );
 
             trace!(result = result, "get_queued_completion_status");
 
             let outcome = if result == FALSE {
-                match errhandlingapi::GetLastError() {
-                    winerror::ERROR_OPERATION_ABORTED => CompletionOutcome::Aborted,
+                match GetLastError() {
+                    ERROR_OPERATION_ABORTED => CompletionOutcome::Aborted,
                     _ => CompletionOutcome::Errored,
                 }
             } else {
@@ -457,7 +454,7 @@ impl Drop for Inner {
     fn drop(&mut self) {
         unsafe {
             // NB: intentionally ignored.
-            let _ = handleapi::CloseHandle(self.handle);
+            let _ = CloseHandle(self.handle);
         }
     }
 }
