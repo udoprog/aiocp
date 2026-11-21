@@ -7,7 +7,6 @@ rust-version = "1.95"
 description = "Simple and experimental asynchronous IOCP driver for Windows."
 documentation = "https://docs.rs/iocp"
 readme = "README.md"
-homepage = "https://github.com/udoprog/aiocp"
 repository = "https://github.com/udoprog/aiocp"
 license = "MIT OR Apache-2.0"
 keywords = ["async", "iocp"]
